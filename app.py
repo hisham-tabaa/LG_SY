@@ -58,6 +58,25 @@ def read_barcode(image):
         return obj.data.decode('utf-8')
     return None
 
+def read_excel_file(content):
+    """Try different methods to read Excel file"""
+    exceptions = []
+    
+    # Try openpyxl engine first (for .xlsx files)
+    try:
+        return pd.read_excel(BytesIO(content), engine='openpyxl')
+    except Exception as e:
+        exceptions.append(f"openpyxl error: {str(e)}")
+    
+    # Try xlrd engine (for older .xls files)
+    try:
+        return pd.read_excel(BytesIO(content), engine='xlrd')
+    except Exception as e:
+        exceptions.append(f"xlrd error: {str(e)}")
+    
+    # If both fail, raise the last exception with details
+    raise Exception(f"Failed to read Excel file with all engines. Errors: {'; '.join(exceptions)}")
+
 def check_serial_in_excel(serial_number, excel_url):
     try:
         logger.info(f"Checking serial number: {serial_number}")
@@ -86,45 +105,44 @@ def check_serial_in_excel(serial_number, excel_url):
             
             if response.status_code != 200:
                 logger.warning(f"Failed to fetch Excel file. Status code: {response.status_code}")
-                logger.warning(f"Response text: {response.text[:500]}...")  # Print first 500 chars of response
+                logger.warning(f"Response text: {response.text[:500]}...")
                 return False
-                
-            # Check if the response is actually an Excel file
-            content_type = response.headers.get('content-type', '').lower()
-            if 'excel' not in content_type and 'spreadsheet' not in content_type:
-                logger.warning(f"Warning: Response may not be an Excel file. Content-Type: {content_type}")
             
-            # Try to read the Excel file
+            # Try to read the Excel file using our helper function
             try:
-                df = pd.read_excel(BytesIO(response.content))
+                df = read_excel_file(response.content)
                 logger.info(f"Successfully read Excel file")
                 logger.info(f"Excel columns: {df.columns.tolist()}")
                 logger.info(f"First few rows: {df.head().to_dict()}")
                 
-                # Check if SerialNumber column exists
-                if 'SerialNumber' not in df.columns:
-                    logger.warning("Warning: 'SerialNumber' column not found in Excel file.")
-                    # Try to find a column that might contain serial numbers
-                    possible_columns = [col for col in df.columns if 'serial' in col.lower()]
-                    if possible_columns:
-                        logger.info(f"Using column {possible_columns[0]} instead")
-                        return serial_number in df[possible_columns[0]].astype(str).values
-                    else:
-                        logger.warning("No suitable column found for serial numbers")
-                        return False
+                # Clean up column names by removing whitespace and making them case-insensitive
+                df.columns = [col.strip().lower() for col in df.columns]
+                
+                # Look for serial number column with various possible names
+                serial_column = None
+                possible_names = ['serialnumber', 'serial_number', 'serial', 'serial no', 'serial_no']
+                
+                for name in possible_names:
+                    if name in df.columns:
+                        serial_column = name
+                        break
+                
+                if serial_column is None:
+                    logger.warning("No serial number column found. Available columns: " + ", ".join(df.columns))
+                    return False
                 
                 # Convert all values to string for comparison and clean them
-                df['SerialNumber'] = df['SerialNumber'].astype(str).str.strip()
+                df[serial_column] = df[serial_column].astype(str).str.strip()
                 serial_number = str(serial_number).strip()
                 
                 # Check if serial number exists in the Excel file
-                result = serial_number in df['SerialNumber'].values
+                result = serial_number in df[serial_column].values
                 logger.info(f"Serial number found: {result}")
                 
                 # If not found, try case-insensitive search
                 if not result:
-                    logger.info(f"Sample values from SerialNumber column: {df['SerialNumber'].head(10).tolist()}")
-                    lower_serials = df['SerialNumber'].str.lower()
+                    logger.info(f"Sample values from serial column: {df[serial_column].head(10).tolist()}")
+                    lower_serials = df[serial_column].str.lower()
                     if serial_number.lower() in lower_serials.values:
                         logger.info("Found with case-insensitive search!")
                         return True
@@ -192,23 +210,38 @@ def debug_excel():
             
         # Try to read the Excel file
         try:
-            df = pd.read_excel(BytesIO(response.content))
+            df = read_excel_file(response.content)
+            
+            # Clean up column names
+            original_columns = df.columns.tolist()
+            df.columns = [col.strip().lower() for col in df.columns]
             
             # Get basic info about the Excel file
             info = {
                 'status': 'success',
                 'url': excel_url,
-                'columns': df.columns.tolist(),
+                'original_columns': original_columns,
+                'cleaned_columns': df.columns.tolist(),
                 'rows': len(df),
                 'sample_data': df.head(5).to_dict(orient='records'),
                 'response_headers': dict(response.headers),
                 'content_type': response.headers.get('content-type', 'unknown')
             }
             
-            # If SerialNumber column exists, provide some stats
-            if 'SerialNumber' in df.columns:
-                info['serial_column_type'] = str(df['SerialNumber'].dtype)
-                info['serial_sample'] = df['SerialNumber'].head(10).tolist()
+            # Look for serial number column
+            possible_names = ['serialnumber', 'serial_number', 'serial', 'serial no', 'serial_no']
+            found_column = None
+            for name in possible_names:
+                if name in df.columns:
+                    found_column = name
+                    break
+            
+            if found_column:
+                info['serial_column_name'] = found_column
+                info['serial_column_type'] = str(df[found_column].dtype)
+                info['serial_sample'] = df[found_column].head(10).tolist()
+            else:
+                info['warning'] = f"No serial number column found. Available columns: {', '.join(df.columns)}"
                 
             return jsonify(info)
             

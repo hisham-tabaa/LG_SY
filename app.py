@@ -9,6 +9,7 @@ import os
 import sys
 import traceback
 from dotenv import load_dotenv
+import urllib.parse
 
 # Load environment variables from .env file if it exists
 if os.path.exists('.env'):
@@ -25,6 +26,26 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 # Set secret key for session management
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-here')
 
+def validate_excel_url(url):
+    """Validate and potentially fix the Excel URL"""
+    try:
+        # Parse the URL
+        parsed = urllib.parse.urlparse(url)
+        
+        # If no scheme is provided, add https://
+        if not parsed.scheme:
+            url = 'https://' + url
+            
+        # Try to make a HEAD request to check if the URL is accessible
+        response = requests.head(url, allow_redirects=True, timeout=10)
+        print(f"URL validation response: {response.status_code}")
+        print(f"Response headers: {dict(response.headers)}")
+        
+        return url, response.status_code == 200
+    except Exception as e:
+        print(f"URL validation error: {str(e)}")
+        return url, False
+
 def read_barcode(image):
     # Decode the barcode image
     decoded_objects = decode(image)
@@ -35,55 +56,86 @@ def read_barcode(image):
 def check_serial_in_excel(serial_number, excel_url):
     try:
         print(f"Checking serial number: {serial_number}")
-        print(f"Excel URL: {excel_url}")
+        print(f"Original Excel URL: {excel_url}")
+        
+        # Validate and potentially fix the URL
+        excel_url, is_valid = validate_excel_url(excel_url)
+        if not is_valid:
+            print("URL validation failed")
+            return False
+            
+        print(f"Validated Excel URL: {excel_url}")
+        
+        # Configure requests session with appropriate headers
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        })
         
         # Read Excel file from URL
-        response = requests.get(excel_url)
-        print(f"Excel response status: {response.status_code}")
-        
-        if response.status_code != 200:
-            print(f"Failed to fetch Excel file. Status code: {response.status_code}")
-            return False
-        
-        # Try to read the Excel file
         try:
-            df = pd.read_excel(BytesIO(response.content))
-            print(f"Excel columns: {df.columns.tolist()}")
-            print(f"First few rows: {df.head().to_dict()}")
+            response = session.get(excel_url, timeout=30)
+            print(f"Excel response status: {response.status_code}")
+            print(f"Response headers: {dict(response.headers)}")
+            print(f"Response content type: {response.headers.get('content-type', 'unknown')}")
             
-            # Check if SerialNumber column exists
-            if 'SerialNumber' not in df.columns:
-                print("Warning: 'SerialNumber' column not found in Excel file.")
-                # Try to find a column that might contain serial numbers
-                possible_columns = [col for col in df.columns if 'serial' in col.lower()]
-                if possible_columns:
-                    print(f"Using column {possible_columns[0]} instead")
-                    return serial_number in df[possible_columns[0]].astype(str).values
-                else:
-                    print("No suitable column found for serial numbers")
-                    return False
+            if response.status_code != 200:
+                print(f"Failed to fetch Excel file. Status code: {response.status_code}")
+                print(f"Response text: {response.text[:500]}...")  # Print first 500 chars of response
+                return False
+                
+            # Check if the response is actually an Excel file
+            content_type = response.headers.get('content-type', '').lower()
+            if 'excel' not in content_type and 'spreadsheet' not in content_type:
+                print(f"Warning: Response may not be an Excel file. Content-Type: {content_type}")
             
-            # Convert all values to string for comparison
-            df['SerialNumber'] = df['SerialNumber'].astype(str)
-            
-            # Check if serial number exists in the Excel file
-            result = serial_number in df['SerialNumber'].values
-            print(f"Serial number found: {result}")
-            
-            # If not found, print some nearby values for debugging
-            if not result:
-                print(f"Sample values from SerialNumber column: {df['SerialNumber'].head(10).tolist()}")
-                # Try case-insensitive search
-                lower_serials = df['SerialNumber'].str.lower()
-                if serial_number.lower() in lower_serials.values:
-                    print("Found with case-insensitive search!")
-                    return True
-            
-            return result
-            
-        except Exception as e:
-            print(f"Error parsing Excel file: {str(e)}")
-            traceback.print_exc(file=sys.stdout)
+            # Try to read the Excel file
+            try:
+                df = pd.read_excel(BytesIO(response.content))
+                print(f"Successfully read Excel file")
+                print(f"Excel columns: {df.columns.tolist()}")
+                print(f"First few rows: {df.head().to_dict()}")
+                
+                # Check if SerialNumber column exists
+                if 'SerialNumber' not in df.columns:
+                    print("Warning: 'SerialNumber' column not found in Excel file.")
+                    # Try to find a column that might contain serial numbers
+                    possible_columns = [col for col in df.columns if 'serial' in col.lower()]
+                    if possible_columns:
+                        print(f"Using column {possible_columns[0]} instead")
+                        return serial_number in df[possible_columns[0]].astype(str).values
+                    else:
+                        print("No suitable column found for serial numbers")
+                        return False
+                
+                # Convert all values to string for comparison and clean them
+                df['SerialNumber'] = df['SerialNumber'].astype(str).str.strip()
+                serial_number = str(serial_number).strip()
+                
+                # Check if serial number exists in the Excel file
+                result = serial_number in df['SerialNumber'].values
+                print(f"Serial number found: {result}")
+                
+                # If not found, try case-insensitive search
+                if not result:
+                    print(f"Sample values from SerialNumber column: {df['SerialNumber'].head(10).tolist()}")
+                    lower_serials = df['SerialNumber'].str.lower()
+                    if serial_number.lower() in lower_serials.values:
+                        print("Found with case-insensitive search!")
+                        return True
+                
+                return result
+                
+            except Exception as e:
+                print(f"Error parsing Excel file: {str(e)}")
+                traceback.print_exc(file=sys.stdout)
+                return False
+                
+        except requests.exceptions.Timeout:
+            print("Request timed out while fetching Excel file")
+            return False
+        except requests.exceptions.RequestException as e:
+            print(f"Request failed: {str(e)}")
             return False
             
     except Exception as e:
@@ -103,27 +155,39 @@ def health():
 @app.route('/debug/excel', methods=['GET'])
 def debug_excel():
     """Debug endpoint to inspect Excel file"""
-    if not os.getenv('FLASK_DEBUG', 'False').lower() == 'true':
-        return jsonify({"error": "Debug mode not enabled"}), 403
-        
     excel_url = os.getenv('EXCEL_URL')
     if not excel_url:
         return jsonify({'error': 'Excel URL not configured'}), 400
         
     try:
-        response = requests.get(excel_url)
+        # Validate URL first
+        excel_url, is_valid = validate_excel_url(excel_url)
+        if not is_valid:
+            return jsonify({'error': 'Invalid or inaccessible Excel URL'}), 400
+            
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        })
+        
+        response = session.get(excel_url, timeout=30)
         if response.status_code != 200:
             return jsonify({
-                'error': f'Failed to fetch Excel file. Status code: {response.status_code}'
+                'error': f'Failed to fetch Excel file. Status code: {response.status_code}',
+                'response_text': response.text[:500],
+                'headers': dict(response.headers)
             }), 400
             
         df = pd.read_excel(BytesIO(response.content))
         
         # Get basic info about the Excel file
         info = {
+            'url': excel_url,
             'columns': df.columns.tolist(),
             'rows': len(df),
             'sample_data': df.head(5).to_dict(orient='records'),
+            'response_headers': dict(response.headers),
+            'content_type': response.headers.get('content-type', 'unknown')
         }
         
         # If SerialNumber column exists, provide some stats
@@ -136,15 +200,13 @@ def debug_excel():
     except Exception as e:
         return jsonify({
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'traceback': traceback.format_exc(),
+            'url_tried': excel_url
         }), 500
 
 @app.route('/debug/check/<serial>', methods=['GET'])
 def debug_check_serial(serial):
     """Debug endpoint to directly check a serial number"""
-    if not os.getenv('FLASK_DEBUG', 'False').lower() == 'true':
-        return jsonify({"error": "Debug mode not enabled"}), 403
-        
     excel_url = os.getenv('EXCEL_URL')
     if not excel_url:
         return jsonify({'error': 'Excel URL not configured'}), 400
@@ -154,7 +216,8 @@ def debug_check_serial(serial):
     return jsonify({
         'serial': serial,
         'valid': is_valid,
-        'message': 'This product is from LG Syria' if is_valid else 'Product not found'
+        'message': 'This product is from LG Syria' if is_valid else 'Product not found',
+        'excel_url': excel_url
     })
 
 @app.route('/check_serial', methods=['POST'])

@@ -23,8 +23,14 @@ COPY . .
 RUN mkdir -p static/uploads
 
 # Set environment variables
-ENV PORT=8080
 ENV PYTHONUNBUFFERED=1
+ENV PORT=8080
+
+# Create a script to start the application
+RUN echo '#!/bin/bash\n\
+PORT="${PORT:-8080}"\n\
+exec gunicorn --bind "0.0.0.0:$PORT" app:app\n' > /app/start.sh && \
+    chmod +x /app/start.sh
 
 # Run the application
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "app:app"] 
+CMD ["/app/start.sh"] 

@@ -29,6 +29,20 @@
                             <span>OR</span>
                         </div>
 
+                        <!-- Serial Number Image Upload -->
+                        <div class="mb-4">
+                            <h4>Upload Serial Number Image</h4>
+                            <p class="text-muted small">Upload a clear image of the product serial number and we'll extract it automatically</p>
+                            <div class="input-group">
+                                <input type="file" id="serialImage" class="form-control" accept="image/*">
+                                <button class="btn btn-primary" onclick="uploadSerialImage()">Upload & Verify</button>
+                            </div>
+                        </div>
+
+                        <div class="separator text-center mb-4">
+                            <span>OR</span>
+                        </div>
+
                         <!-- Barcode Upload -->
                         <div class="mb-4">
                             <h4>Upload Barcode Image</h4>
@@ -41,6 +55,7 @@
                         <!-- Result Display -->
                         <div id="resultContainer" class="mt-4 d-none">
                             <div class="alert" role="alert" id="resultMessage"></div>
+                            <div id="extractedInfo" class="small text-muted mt-2 d-none"></div>
                         </div>
 
                         <!-- Loading Spinner -->

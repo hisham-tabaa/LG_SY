@@ -47,6 +47,11 @@ def check_serial_in_excel(serial_number, excel_url):
 def index():
     return render_template('index.html')
 
+@app.route('/health')
+def health():
+    """Health check endpoint for Railway"""
+    return jsonify({"status": "ok"}), 200
+
 @app.route('/check_serial', methods=['POST'])
 def check_serial():
     serial_number = request.form.get('serial_number')

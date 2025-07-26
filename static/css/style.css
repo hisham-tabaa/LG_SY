@@ -1,22 +1,45 @@
 body {
     background-color: #f8f9fa;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-family: 'Segoe UI', 'Cairo', Tahoma, Geneva, Verdana, sans-serif;
+    direction: ltr;
+}
+
+body.rtl {
+    direction: rtl;
+    text-align: right;
+}
+
+.logo-container {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.logo-img {
+    max-height: 100px;
+    max-width: 100%;
 }
 
 .card {
     border: none;
     border-radius: 15px;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.1);
 }
 
 .card-header {
     border-radius: 15px 15px 0 0 !important;
-    background: linear-gradient(135deg, #a90329 0%, #8f0222 44%, #6d0019 100%) !important;
+    background: linear-gradient(135deg, #983b3b 0%, #2b4170 100%) !important;
+    padding: 20px;
 }
 
 .card-header h2 {
     margin: 0;
     padding: 15px;
     font-size: 24px;
+    font-weight: 600;
+}
+
+.card-body {
+    padding: 30px;
 }
 
 .separator {
@@ -44,17 +67,57 @@ body {
 }
 
 .btn-primary {
-    background: #a90329;
-    border-color: #8f0222;
+    background: #3b5998;
+    border-color: #2b4170;
+    transition: all 0.3s ease;
 }
 
 .btn-primary:hover {
-    background: #6d0019;
-    border-color: #6d0019;
+    background: #2b4170;
+    border-color: #2b4170;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.btn-secondary {
+    background: #6c757d;
+    border-color: #5a6268;
+    transition: all 0.3s ease;
+}
+
+.btn-primary:hover {
+    background: #2bacac;
+    border-color: #e70000;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+#cameraBtn {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.9rem;
+}
+
+#cameraBtn i {
+    margin-right: 5px;
+    font-size: 1.1rem;
+}
+
+.rtl #cameraBtn i {
+    margin-right: 0;
+    margin-left: 5px;
 }
 
 .input-group {
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    margin-bottom: 15px;
+}
+
+.form-control:focus {
+    border-color: #3b5998;
+    box-shadow: 0 0 0 0.25rem rgba(59, 89, 152, 0.25);
 }
 
 .alert {
@@ -76,4 +139,47 @@ body {
 
 #loadingSpinner {
     margin: 20px 0;
+}
+
+.language-selector {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 1000;
+}
+
+.rtl .language-selector {
+    right: auto;
+    left: 10px;
+}
+
+.language-btn {
+    background: transparent;
+    border: 1px solid #002fb1;
+    color: #036685;
+    border-radius: 4px;
+    padding: 5px 10px;
+    margin-left: 5px;
+    font-size: 12px;
+    transition: all 0.3s ease;
+}
+
+.language-btn:hover, .language-btn.active {
+    background: #0862d8;
+    color: #000000;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .card-header h2 {
+        font-size: 20px;
+    }
+    
+    .card-body {
+        padding: 20px;
+    }
+    
+    #cameraBtn {
+        margin-bottom: 10px;
+    }
 } 

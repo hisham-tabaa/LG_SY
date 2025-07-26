@@ -2,14 +2,13 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies for OpenCV, pyzbar, and Tesseract OCR
+# Install system dependencies for OpenCV and Tesseract OCR
 RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
     libxrender-dev \
-    libzbar0 \
     tesseract-ocr \
     libtesseract-dev \
     tesseract-ocr-eng \

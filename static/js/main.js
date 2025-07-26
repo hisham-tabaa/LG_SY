@@ -1,7 +1,76 @@
+// Language management
+let currentLanguage = 'en';
+
+// Translations for messages
+const translations = {
+    en: {
+        success: 'This product is from LG Syria',
+        notFound: 'Product not found',
+        enterSerial: 'Please enter a serial number',
+        selectImage: 'Please select an image of the serial number',
+        processingError: 'Failed to process image',
+        verifyError: 'Failed to verify serial number',
+        takePicture: 'Take Picture',
+        useCamera: 'Use Camera'
+    },
+    ar: {
+        success: 'هذا المنتج من إل جي سوريا',
+        notFound: 'المنتج غير موجود',
+        enterSerial: 'الرجاء إدخال الرقم التسلسلي',
+        selectImage: 'الرجاء اختيار صورة للرقم التسلسلي',
+        processingError: 'فشل في معالجة الصورة',
+        verifyError: 'فشل في التحقق من الرقم التسلسلي',
+        takePicture: 'التقاط صورة',
+        useCamera: 'استخدام الكاميرا'
+    }
+};
+
+// Change language function
+function changeLanguage(lang) {
+    currentLanguage = lang;
+    
+    // Update HTML direction
+    if (lang === 'ar') {
+        document.documentElement.setAttribute('dir', 'rtl');
+        document.body.classList.add('rtl');
+    } else {
+        document.documentElement.setAttribute('dir', 'ltr');
+        document.body.classList.remove('rtl');
+    }
+    
+    // Update language buttons
+    document.querySelectorAll('.language-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    document.querySelector(`.language-btn[onclick="changeLanguage('${lang}')"]`).classList.add('active');
+    
+    // Show/hide language-specific elements
+    document.querySelectorAll('.lang-en, .lang-ar').forEach(el => {
+        el.style.display = 'none';
+    });
+    document.querySelectorAll(`.lang-${lang}`).forEach(el => {
+        el.style.display = '';
+    });
+    
+    // Update placeholder text
+    if (lang === 'ar') {
+        document.getElementById('serialNumber').placeholder = 'أدخل الرقم التسلسلي للمنتج';
+    } else {
+        document.getElementById('serialNumber').placeholder = 'Enter product serial number';
+    }
+    
+    // Update camera button text if it exists
+    const cameraBtn = document.getElementById('cameraBtn');
+    if (cameraBtn) {
+        cameraBtn.textContent = translations[lang].useCamera;
+    }
+}
+
 // Show loading spinner
 function showLoading() {
     document.getElementById('loadingSpinner').classList.remove('d-none');
     document.getElementById('resultContainer').classList.add('d-none');
+    document.getElementById('productDetails').classList.add('d-none');
 }
 
 // Hide loading spinner
@@ -10,10 +79,11 @@ function hideLoading() {
 }
 
 // Display result message
-function showResult(message, isSuccess, extraInfo = null) {
+function showResult(message, isSuccess, extraInfo = null, productData = null) {
     const resultContainer = document.getElementById('resultContainer');
     const resultMessage = document.getElementById('resultMessage');
     const extractedInfo = document.getElementById('extractedInfo');
+    const productDetails = document.getElementById('productDetails');
     
     resultContainer.classList.remove('d-none');
     resultMessage.textContent = message;
@@ -26,6 +96,16 @@ function showResult(message, isSuccess, extraInfo = null) {
     } else {
         extractedInfo.classList.add('d-none');
     }
+    
+    // Show product details if available
+    if (productData && isSuccess) {
+        document.getElementById('productSerial').textContent = productData.serial || '';
+        document.getElementById('productName').textContent = productData.name || '';
+        document.getElementById('productDescription').textContent = productData.description || '';
+        productDetails.classList.remove('d-none');
+    } else {
+        productDetails.classList.add('d-none');
+    }
 }
 
 // Handle manual serial number check
@@ -33,7 +113,7 @@ async function checkSerial() {
     const serialNumber = document.getElementById('serialNumber').value.trim();
     
     if (!serialNumber) {
-        showResult('Please enter a serial number', false);
+        showResult(translations[currentLanguage].enterSerial, false);
         return;
     }
 
@@ -42,6 +122,7 @@ async function checkSerial() {
     try {
         const formData = new FormData();
         formData.append('serial_number', serialNumber);
+        formData.append('lang', currentLanguage);
 
         const response = await fetch('/check_serial', {
             method: 'POST',
@@ -51,15 +132,43 @@ async function checkSerial() {
         const data = await response.json();
         
         if (response.ok) {
-            showResult(data.message, data.valid);
+            showResult(
+                data.message, 
+                data.valid, 
+                null, 
+                data.valid ? {
+                    serial: data.serial_number,
+                    name: data.product_name,
+                    description: data.product_description
+                } : null
+            );
         } else {
-            showResult(data.error || 'An error occurred', false);
+            showResult(data.error || translations[currentLanguage].verifyError, false);
         }
     } catch (error) {
-        showResult('Failed to verify serial number', false);
+        showResult(translations[currentLanguage].verifyError, false);
     } finally {
         hideLoading();
     }
+}
+
+// Handle image capture from camera
+function setupCameraCapture() {
+    const fileInput = document.getElementById('serialImage');
+    const cameraBtn = document.getElementById('cameraBtn');
+    
+    if (!cameraBtn) return;
+    
+    cameraBtn.addEventListener('click', function() {
+        // Set capture attribute to camera to force using the camera
+        fileInput.setAttribute('capture', 'environment');
+        fileInput.click();
+        
+        // Remove the capture attribute after clicking to allow gallery selection next time
+        setTimeout(() => {
+            fileInput.removeAttribute('capture');
+        }, 1000);
+    });
 }
 
 // Handle serial number image upload
@@ -68,7 +177,7 @@ async function uploadSerialImage() {
     const file = fileInput.files[0];
 
     if (!file) {
-        showResult('Please select an image of the serial number', false);
+        showResult(translations[currentLanguage].selectImage, false);
         return;
     }
 
@@ -77,6 +186,7 @@ async function uploadSerialImage() {
     try {
         const formData = new FormData();
         formData.append('serial_image', file);
+        formData.append('lang', currentLanguage);
 
         const response = await fetch('/upload_serial_image', {
             method: 'POST',
@@ -88,62 +198,39 @@ async function uploadSerialImage() {
         if (response.ok) {
             let extraInfo = null;
             if (data.serial_number) {
-                extraInfo = `Extracted serial number: ${data.serial_number}`;
+                extraInfo = currentLanguage === 'en' ? 
+                    `Extracted serial number: ${data.serial_number}` : 
+                    `الرقم التسلسلي المستخرج: ${data.serial_number}`;
+                    
                 if (data.extracted_text) {
-                    extraInfo += `\nExtracted text: ${data.extracted_text}`;
+                    extraInfo += currentLanguage === 'en' ? 
+                        `\nExtracted text: ${data.extracted_text}` : 
+                        `\nالنص المستخرج: ${data.extracted_text}`;
                 }
             }
-            showResult(data.message, data.valid, extraInfo);
+            
+            showResult(
+                data.message, 
+                data.valid, 
+                extraInfo, 
+                data.valid ? {
+                    serial: data.serial_number,
+                    name: data.product_name,
+                    description: data.product_description
+                } : null
+            );
         } else {
-            let errorMsg = data.error || 'An error occurred';
+            let errorMsg = data.error || translations[currentLanguage].processingError;
             let extraInfo = null;
             if (data.extracted_text) {
-                extraInfo = `Extracted text: ${data.extracted_text}\n(Could not identify a valid serial number)`;
+                extraInfo = currentLanguage === 'en' ? 
+                    `Extracted text: ${data.extracted_text}\n(Could not identify a valid serial number)` : 
+                    `النص المستخرج: ${data.extracted_text}\n(لم نتمكن من تحديد رقم تسلسلي صالح)`;
             }
             showResult(errorMsg, false, extraInfo);
         }
     } catch (error) {
-        showResult('Failed to process serial number image', false);
-    } finally {
-        hideLoading();
-        fileInput.value = ''; // Clear the file input
-    }
-}
-
-// Handle barcode image upload
-async function uploadBarcode() {
-    const fileInput = document.getElementById('barcodeImage');
-    const file = fileInput.files[0];
-
-    if (!file) {
-        showResult('Please select a barcode image', false);
-        return;
-    }
-
-    showLoading();
-
-    try {
-        const formData = new FormData();
-        formData.append('barcode', file);
-
-        const response = await fetch('/upload_barcode', {
-            method: 'POST',
-            body: formData
-        });
-
-        const data = await response.json();
-        
-        if (response.ok) {
-            let extraInfo = null;
-            if (data.serial_number) {
-                extraInfo = `Extracted serial number from barcode: ${data.serial_number}`;
-            }
-            showResult(data.message, data.valid, extraInfo);
-        } else {
-            showResult(data.error || 'An error occurred', false);
-        }
-    } catch (error) {
-        showResult('Failed to process barcode image', false);
+        showResult(translations[currentLanguage].processingError, false);
     } finally {
         hideLoading();
         fileInput.value = ''; // Clear the file input
@@ -156,4 +243,18 @@ document.getElementById('serialNumber').addEventListener('keypress', function(ev
         event.preventDefault();
         checkSerial();
     }
+});
+
+// Initialize language and camera functionality on page load
+document.addEventListener('DOMContentLoaded', function() {
+    // Check if browser language is Arabic
+    const browserLang = navigator.language || navigator.userLanguage;
+    if (browserLang.startsWith('ar')) {
+        changeLanguage('ar');
+    } else {
+        changeLanguage('en');
+    }
+    
+    // Setup camera capture
+    setupCameraCapture();
 }); 

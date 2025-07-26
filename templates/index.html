@@ -1,54 +1,70 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" dir="ltr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LG Syria Product Verification</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
+    <div class="language-selector">
+        <button class="language-btn active" onclick="changeLanguage('en')">English</button>
+        <button class="language-btn" onclick="changeLanguage('ar')">العربية</button>
+    </div>
+
     <div class="container">
         <div class="row justify-content-center mt-5">
             <div class="col-md-8">
                 <div class="card shadow">
                     <div class="card-header bg-primary text-white text-center">
-                        <h2>LG Syria Product Verification</h2>
+                        <div class="logo-container">
+                            <img src="{{ url_for('static', filename='uploads/MES Logo (1).png') }}" alt="MES Logo" class="logo-img">
+                        </div>
+                        <h2 class="lang-en">LG Syria Product Verification</h2>
+                        <h2 class="lang-ar" style="display: none;">التحقق من منتجات إل جي سوريا</h2>
                     </div>
                     <div class="card-body">
                         <!-- Manual Serial Number Input -->
                         <div class="mb-4">
-                            <h4>Enter Serial Number</h4>
+                            <h4 class="lang-en">Enter Serial Number</h4>
+                            <h4 class="lang-ar" style="display: none;">أدخل الرقم التسلسلي</h4>
                             <div class="input-group">
                                 <input type="text" id="serialNumber" class="form-control" placeholder="Enter product serial number">
-                                <button class="btn btn-primary" onclick="checkSerial()">Verify</button>
+                                <button class="btn btn-primary lang-en" onclick="checkSerial()">Verify</button>
+                                <button class="btn btn-primary lang-ar" style="display: none;" onclick="checkSerial()">تحقق</button>
                             </div>
                         </div>
 
                         <div class="separator text-center mb-4">
-                            <span>OR</span>
+                            <span class="lang-en">OR</span>
+                            <span class="lang-ar" style="display: none;">أو</span>
                         </div>
 
                         <!-- Serial Number Image Upload -->
                         <div class="mb-4">
-                            <h4>Upload Serial Number Image</h4>
-                            <p class="text-muted small">Upload a clear image of the product serial number and we'll extract it automatically</p>
-                            <div class="input-group">
-                                <input type="file" id="serialImage" class="form-control" accept="image/*">
-                                <button class="btn btn-primary" onclick="uploadSerialImage()">Upload & Verify</button>
-                            </div>
-                        </div>
-
-                        <div class="separator text-center mb-4">
-                            <span>OR</span>
-                        </div>
-
-                        <!-- Barcode Upload -->
-                        <div class="mb-4">
-                            <h4>Upload Barcode Image</h4>
-                            <div class="input-group">
-                                <input type="file" id="barcodeImage" class="form-control" accept="image/*">
-                                <button class="btn btn-primary" onclick="uploadBarcode()">Upload & Verify</button>
+                            <h4 class="lang-en">Upload Serial Number Image</h4>
+                            <h4 class="lang-ar" style="display: none;">تحميل صورة الرقم التسلسلي</h4>
+                            <p class="text-muted small lang-en">Upload a clear image of the product serial number and we'll extract it automatically</p>
+                            <p class="text-muted small lang-ar" style="display: none;">قم بتحميل صورة واضحة للرقم التسلسلي للمنتج وسنقوم باستخراجه تلقائيًا</p>
+                            
+                            <div class="row">
+                                <div class="col-md-8 mb-2">
+                                    <div class="input-group">
+                                        <input type="file" id="serialImage" class="form-control" accept="image/*">
+                                        <button class="btn btn-primary lang-en" onclick="uploadSerialImage()">Upload & Verify</button>
+                                        <button class="btn btn-primary lang-ar" style="display: none;" onclick="uploadSerialImage()">تحميل وتحقق</button>
+                                    </div>
+                                </div>
+                                <div class="col-md-4 mb-2">
+                                    <button id="cameraBtn" class="btn btn-secondary w-100">
+                                        <i class="bi bi-camera"></i> 
+                                        <span class="lang-en">Use Camera</span>
+                                        <span class="lang-ar" style="display: none;">استخدام الكاميرا</span>
+                                    </button>
+                                </div>
                             </div>
                         </div>
 
@@ -56,6 +72,35 @@
                         <div id="resultContainer" class="mt-4 d-none">
                             <div class="alert" role="alert" id="resultMessage"></div>
                             <div id="extractedInfo" class="small text-muted mt-2 d-none"></div>
+                            
+                            <!-- Product Details Display (New) -->
+                            <div id="productDetails" class="mt-3 d-none">
+                                <div class="card">
+                                    <div class="card-header bg-light">
+                                        <h5 class="mb-0 lang-en">Product Details</h5>
+                                        <h5 class="mb-0 lang-ar" style="display: none;">تفاصيل المنتج</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="row">
+                                            <div class="col-md-4 lang-en">Serial Number:</div>
+                                            <div class="col-md-4 lang-ar" style="display: none;">الرقم التسلسلي:</div>
+                                            <div class="col-md-8" id="productSerial"></div>
+                                        </div>
+                                        <hr>
+                                        <div class="row">
+                                            <div class="col-md-4 lang-en">Product Name:</div>
+                                            <div class="col-md-4 lang-ar" style="display: none;">اسم المنتج:</div>
+                                            <div class="col-md-8" id="productName"></div>
+                                        </div>
+                                        <hr>
+                                        <div class="row">
+                                            <div class="col-md-4 lang-en">Product Description:</div>
+                                            <div class="col-md-4 lang-ar" style="display: none;">وصف المنتج:</div>
+                                            <div class="col-md-8" id="productDescription"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
                         <!-- Loading Spinner -->
@@ -63,6 +108,8 @@
                             <div class="spinner-border text-primary" role="status">
                                 <span class="visually-hidden">Loading...</span>
                             </div>
+                            <p class="mt-2 lang-en">Verifying product...</p>
+                            <p class="mt-2 lang-ar" style="display: none;">جاري التحقق من المنتج...</p>
                         </div>
                     </div>
                 </div>

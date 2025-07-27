@@ -137,53 +137,67 @@ def validate_excel_url(url):
         logger.error(f"URL validation error: {str(e)}")
         return url, False
 
+def enhance_for_ocr(image):
+    # If image is small, upscale it
+    min_dim = min(image.shape[:2])
+    if min_dim < 100:
+        scale = 4 if min_dim < 50 else 2
+        image = cv2.resize(image, (image.shape[1]*scale, image.shape[0]*scale), interpolation=cv2.INTER_CUBIC)
+    # Convert to grayscale
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    # Apply adaptive thresholding
+    gray = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+    # Denoise
+    gray = cv2.fastNlMeansDenoising(gray, None, 30, 7, 21)
+    # Convert to PIL for further enhancement
+    pil_img = Image.fromarray(gray)
+    # Increase contrast
+    pil_img = ImageEnhance.Contrast(pil_img).enhance(2.5)
+    # Sharpen
+    pil_img = pil_img.filter(ImageFilter.SHARPEN)
+    # Convert back to OpenCV
+    image = cv2.cvtColor(np.array(pil_img), cv2.COLOR_GRAY2BGR)
+    return image
+
 def extract_text_from_image(image):
     """Extract text from image using OCR"""
     if not OCR_AVAILABLE:
         logger.warning("OCR functionality is not available")
         return None
-        
     try:
         # Convert OpenCV image to PIL format if needed
         if isinstance(image, np.ndarray):
-            # Convert BGR to RGB
+            # Convert BGR to RGB or keep grayscale
             if len(image.shape) == 3 and image.shape[2] == 3:
                 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             pil_image = Image.fromarray(image)
         else:
             pil_image = image
-            
-        # Try different PSM modes for better results
+        # Try different PSM/OEM configs, no char whitelist
         configs = [
-            '--psm 6 --oem 3 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',  # Assume single uniform block
-            '--psm 7 --oem 3 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',  # Treat as single line
-            '--psm 8 --oem 3 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',  # Treat as single word
-            '--psm 10 --oem 3 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'  # Treat as single character
+            '--psm 6 --oem 3',
+            '--psm 7 --oem 3',
+            '--psm 8 --oem 3',
+            '--psm 11 --oem 3',
+            '--psm 13 --oem 3',
         ]
-        
         all_texts = []
         for config in configs:
             try:
-                text = pytesseract.image_to_string(pil_image, config=config)
+                text = pytesseract.image_to_string(pil_image, lang='eng', config=config)
                 text = text.strip()
                 if text:
-                    all_texts.append(text)
+                    all_texts.append(f"[{config}] {text}")
                     logger.info(f"Extracted text with config {config}: {text}")
             except Exception as e:
                 logger.warning(f"OCR failed with config {config}: {str(e)}")
-                
         # If we got any text, return the longest one
         if all_texts:
             # Sort by length, descending
-            all_texts.sort(key=len, reverse=True)
-            return all_texts[0]
-        
-        # If all methods failed, try a direct approach for the specific image
-        # This is a fallback for the LGQM3WQF9Z image
-        if image.shape[0] > 100 and image.shape[1] > 100:
-            # For the specific case of the LGQM3WQF9Z image
-            return "LGQM3WQF9Z"
-            
+            all_texts.sort(key=lambda x: len(x), reverse=True)
+            # Return just the text part (not config)
+            return all_texts[0].split('] ', 1)[-1]
+        # If all methods failed, return None
         return None
     except Exception as e:
         logger.error(f"Error during OCR: {str(e)}")
@@ -486,22 +500,6 @@ def fix_image_orientation(image):
         logger.warning(f"Error fixing image orientation: {str(e)}")
         # Return original image if any error occurs
         return image
-
-def enhance_for_ocr(image):
-    # If image is small, upscale it
-    min_dim = min(image.shape[:2])
-    if min_dim < 100:
-        scale = 4 if min_dim < 50 else 2
-        image = cv2.resize(image, (image.shape[1]*scale, image.shape[0]*scale), interpolation=cv2.INTER_CUBIC)
-    # Convert to PIL for further enhancement
-    pil_img = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-    # Increase contrast
-    pil_img = ImageEnhance.Contrast(pil_img).enhance(2.0)
-    # Sharpen
-    pil_img = pil_img.filter(ImageFilter.SHARPEN)
-    # Convert back to OpenCV
-    image = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-    return image
 
 @app.route('/')
 def index():

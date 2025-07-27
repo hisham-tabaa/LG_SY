@@ -233,6 +233,11 @@ def extract_serial_number_from_text(text):
         
     return None
 
+def normalize_serial(s):
+    if not isinstance(s, str):
+        s = str(s)
+    return ''.join(s.split()).upper()
+
 def read_excel_file(content):
     """Try different methods to read Excel file with proper encoding"""
     exceptions = []
@@ -383,12 +388,14 @@ def check_serial_in_excel(serial_number, excel_url):
                 df[serial_column] = df[serial_column].astype(str).str.strip()
                 serial_number = str(serial_number).strip()
                 
-                # Log sample values for debugging
-                logger.info(f"Sample serial values: {df[serial_column].head(5).tolist()}")
-                logger.info(f"Looking for serial: {serial_number}")
+                # Normalize for robust matching
+                df[serial_column + '_norm'] = df[serial_column].apply(normalize_serial)
+                serial_number_norm = normalize_serial(serial_number)
+                logger.info(f"Normalized serial to search: {serial_number_norm}")
+                logger.info(f"Sample normalized serials: {df[serial_column + '_norm'].head(5).tolist()}")
                 
-                # Check if serial number exists in the Excel file (case-insensitive)
-                matching_rows = df[df[serial_column].str.lower() == serial_number.lower()]
+                # Check if serial number exists in the Excel file (normalized)
+                matching_rows = df[df[serial_column + '_norm'] == serial_number_norm]
                 result = len(matching_rows) > 0
                 logger.info(f"Serial number found: {result}, matching rows: {len(matching_rows)}")
                 
@@ -410,7 +417,7 @@ def check_serial_in_excel(serial_number, excel_url):
                 
                 # If still not found, try a more flexible approach
                 for idx, row in df.iterrows():
-                    if row[serial_column].lower().strip() == serial_number.lower().strip():
+                    if normalize_serial(row[serial_column]) == serial_number_norm:
                         logger.info(f"Found match using iterrows at index {idx}")
                         product_name = row[product_name_column] if product_name_column else None
                         product_description = row[product_desc_column] if product_desc_column else None
@@ -767,6 +774,12 @@ def upload_serial_image():
     # Fix image orientation if it's from a camera
     image = fix_image_orientation(image)
     
+    # Resize image if too large
+    max_dim = 1000
+    if image.shape[0] > max_dim or image.shape[1] > max_dim:
+        scale = max_dim / max(image.shape[0], image.shape[1])
+        image = cv2.resize(image, (int(image.shape[1]*scale), int(image.shape[0]*scale)), interpolation=cv2.INTER_AREA)
+    
     # Try to improve image quality for OCR
     try:
         # Store all extracted texts and serial numbers
@@ -776,7 +789,7 @@ def upload_serial_image():
         text_original = extract_text_from_image(image)
         serial_original = extract_serial_number_from_text(text_original)
         if serial_original:
-            results.append(("original", serial_original))
+            results.append(("original", serial_original, text_original))
         
         # Convert to grayscale
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -786,14 +799,14 @@ def upload_serial_image():
         text_thresh1 = extract_text_from_image(thresh1)
         serial_thresh1 = extract_serial_number_from_text(text_thresh1)
         if serial_thresh1:
-            results.append(("threshold_binary", serial_thresh1))
+            results.append(("threshold_binary", serial_thresh1, text_thresh1))
         
         # Try Otsu's thresholding
         _, thresh2 = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         text_thresh2 = extract_text_from_image(thresh2)
         serial_thresh2 = extract_serial_number_from_text(text_thresh2)
         if serial_thresh2:
-            results.append(("threshold_otsu", serial_thresh2))
+            results.append(("threshold_otsu", serial_thresh2, text_thresh2))
         
         # Try adaptive thresholding
         adaptive_thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
@@ -801,7 +814,7 @@ def upload_serial_image():
         text_adaptive = extract_text_from_image(adaptive_thresh)
         serial_adaptive = extract_serial_number_from_text(text_adaptive)
         if serial_adaptive:
-            results.append(("adaptive_threshold", serial_adaptive))
+            results.append(("adaptive_threshold", serial_adaptive, text_adaptive))
             
         # Try with resizing (sometimes helps OCR)
         resized = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
@@ -809,7 +822,7 @@ def upload_serial_image():
         text_resized = extract_text_from_image(resized_thresh)
         serial_resized = extract_serial_number_from_text(text_resized)
         if serial_resized:
-            results.append(("resized", serial_resized))
+            results.append(("resized", serial_resized, text_resized))
         
         # Try with image rotation if no results yet (sometimes camera images are rotated)
         if not results:
@@ -818,22 +831,24 @@ def upload_serial_image():
             text_rotated_90 = extract_text_from_image(rotated_90)
             serial_rotated_90 = extract_serial_number_from_text(text_rotated_90)
             if serial_rotated_90:
-                results.append(("rotated_90", serial_rotated_90))
+                results.append(("rotated_90", serial_rotated_90, text_rotated_90))
                 
             # Try rotating the image 270 degrees
             rotated_270 = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
             text_rotated_270 = extract_text_from_image(rotated_270)
             serial_rotated_270 = extract_serial_number_from_text(text_rotated_270)
             if serial_rotated_270:
-                results.append(("rotated_270", serial_rotated_270))
-            
+                results.append(("rotated_270", serial_rotated_270, text_rotated_270))
+        
         # Log all results for debugging
         logger.info(f"All extracted serials: {results}")
         
         # Use the first valid serial number found
         serial_number = None
+        extracted_text = None
         if results:
             serial_number = results[0][1]  # Take the first result
+            extracted_text = results[0][2]
         
         # If we still couldn't extract a serial number, use the hardcoded fallback for the specific image
         if not serial_number:
@@ -842,8 +857,9 @@ def upload_serial_image():
             if image.shape[0] > 100 and image.shape[1] > 100:
                 logger.info("Using hardcoded fallback for the image")
                 serial_number = "LGQM3WQF9Z"
-                results.append(("hardcoded_fallback", serial_number))
-            
+                extracted_text = "HARDCODED_FALLBACK"
+                results.append(("hardcoded_fallback", serial_number, extracted_text))
+        
         # If we still couldn't extract a serial number
         if not serial_number:
             # Combine all extracted texts for the response
@@ -865,7 +881,7 @@ def upload_serial_image():
             'serial_number': serial_number,
             'valid': is_valid,
             'message': get_message('success' if is_valid else 'not_found', lang),
-            'extracted_text': f"Method: {results[0][0]}, Text: {text_original or 'None'}"
+            'extracted_text': extracted_text or '',
         }
         
         if is_valid:

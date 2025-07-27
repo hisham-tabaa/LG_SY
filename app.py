@@ -12,6 +12,7 @@ import urllib.parse
 import logging
 import re
 import subprocess
+from PIL import ImageEnhance, ImageFilter
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -486,6 +487,22 @@ def fix_image_orientation(image):
         # Return original image if any error occurs
         return image
 
+def enhance_for_ocr(image):
+    # If image is small, upscale it
+    min_dim = min(image.shape[:2])
+    if min_dim < 100:
+        scale = 4 if min_dim < 50 else 2
+        image = cv2.resize(image, (image.shape[1]*scale, image.shape[0]*scale), interpolation=cv2.INTER_CUBIC)
+    # Convert to PIL for further enhancement
+    pil_img = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+    # Increase contrast
+    pil_img = ImageEnhance.Contrast(pil_img).enhance(2.0)
+    # Sharpen
+    pil_img = pil_img.filter(ImageFilter.SHARPEN)
+    # Convert back to OpenCV
+    image = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+    return image
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -749,23 +766,8 @@ def upload_serial_image():
     
     # Check if OCR is available
     if not OCR_AVAILABLE:
-        logger.warning("OCR functionality is not available. Using hardcoded fallback for the image.")
-        # Hardcoded fallback for the specific LGQM3WQF9Z image
-        serial_number = "LGQM3WQF9Z"
-        is_valid, product_name, product_description = check_serial_in_excel(serial_number, excel_url)
-        
-        response_data = {
-            'serial_number': serial_number,
-            'valid': is_valid,
-            'message': get_message('success' if is_valid else 'not_found', lang),
-            'extracted_text': "OCR not available. Using direct recognition."
-        }
-        
-        if is_valid:
-            response_data['product_name'] = product_name
-            response_data['product_description'] = product_description
-        
-        return jsonify(response_data)
+        logger.warning("OCR functionality is not available.")
+        return jsonify({'error': get_message('error_ocr', lang)}), 400
     
     # Read and process the image
     file_bytes = np.frombuffer(file.read(), np.uint8)
@@ -773,6 +775,8 @@ def upload_serial_image():
     
     # Fix image orientation if it's from a camera
     image = fix_image_orientation(image)
+    # Enhance for OCR (upscale, contrast, sharpen)
+    image = enhance_for_ocr(image)
     
     # Resize image if too large
     max_dim = 1000
@@ -850,25 +854,13 @@ def upload_serial_image():
             serial_number = results[0][1]  # Take the first result
             extracted_text = results[0][2]
         
-        # If we still couldn't extract a serial number, use the hardcoded fallback for the specific image
+        # If we still couldn't extract a serial number, return an error with all extracted texts
         if not serial_number:
-            # For the specific case of the LGQM3WQF9Z image
-            # This is a last resort fallback
-            if image.shape[0] > 100 and image.shape[1] > 100:
-                logger.info("Using hardcoded fallback for the image")
-                serial_number = "LGQM3WQF9Z"
-                extracted_text = "HARDCODED_FALLBACK"
-                results.append(("hardcoded_fallback", serial_number, extracted_text))
-        
-        # If we still couldn't extract a serial number
-        if not serial_number:
-            # Combine all extracted texts for the response
             all_texts = f"Original: {text_original or 'None'}\n"
             all_texts += f"Binary Threshold: {text_thresh1 or 'None'}\n"
             all_texts += f"Otsu Threshold: {text_thresh2 or 'None'}\n"
             all_texts += f"Adaptive Threshold: {text_adaptive or 'None'}\n"
             all_texts += f"Resized: {text_resized or 'None'}"
-            
             return jsonify({
                 'error': get_message('error_ocr', lang),
                 'extracted_text': all_texts
@@ -893,24 +885,10 @@ def upload_serial_image():
     except Exception as e:
         logger.error(f"Error processing image: {str(e)}")
         traceback.print_exc(file=sys.stdout)
-        
-        # Last resort fallback
-        logger.info("Exception occurred, using hardcoded fallback")
-        serial_number = "LGQM3WQF9Z"
-        is_valid, product_name, product_description = check_serial_in_excel(serial_number, excel_url)
-        
-        response_data = {
-            'serial_number': serial_number,
-            'valid': is_valid,
-            'message': get_message('success' if is_valid else 'not_found', lang),
-            'extracted_text': f"Error processing image, using fallback: {str(e)}"
-        }
-        
-        if is_valid:
-            response_data['product_name'] = product_name
-            response_data['product_description'] = product_description
-        
-        return jsonify(response_data)
+        return jsonify({
+            'error': get_message('error_ocr', lang),
+            'extracted_text': f"Error processing image: {str(e)}"
+        }), 400
 
 if __name__ == '__main__':
     # Use environment variables for host and port if available

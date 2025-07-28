@@ -44,5 +44,15 @@ ENV FLASK_APP=app.py
 ENV FLASK_ENV=production
 ENV PYTHONUNBUFFERED=1
 
+# Create start script for Railway compatibility
+RUN echo '#!/bin/bash\n\
+echo "=== LG Syria App Starting ==="\n\
+echo "Testing Tesseract installation:"\n\
+tesseract --version || echo "Tesseract not found"\n\
+echo "Python path: $(which python)"\n\
+echo "Starting Flask application..."\n\
+exec python app.py' > /app/start.sh && \
+    chmod +x /app/start.sh
+
 # Command to run the application
-CMD ["python", "app.py"] 
+CMD ["/app/start.sh"] 

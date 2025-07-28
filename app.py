@@ -235,10 +235,10 @@ def check_serial_in_excel(serial_number, excel_url):
         # Check if serial number exists in the Excel file (normalized)
         matching_rows = df[df['serial_normalized'] == serial_number_norm]
         result = len(matching_rows) > 0
-        logger.info(f"Serial number found: {result}")
+        logger.info(f"Exact serial number match found: {result}")
         
+        # If exact match found, return it
         if result:
-            # Get the product details from the matching row
             product_name = None
             product_description = None
             
@@ -250,6 +250,51 @@ def check_serial_in_excel(serial_number, excel_url):
             
             return True, product_name, product_description
         
+        # If no exact match, try fuzzy matching for OCR errors
+        logger.info("Attempting fuzzy matching for potential OCR errors...")
+        
+        # Get all normalized serials for comparison
+        all_serials = df['serial_normalized'].tolist()
+        
+        # Try to find close matches (1-2 character differences)
+        from difflib import SequenceMatcher
+        
+        best_match = None
+        best_similarity = 0.0
+        min_similarity_threshold = 0.85  # 85% similarity required
+        
+        for excel_serial in all_serials:
+            if not excel_serial or len(excel_serial) < 6:
+                continue
+                
+            # Calculate similarity
+            similarity = SequenceMatcher(None, serial_number_norm, excel_serial).ratio()
+            
+            # Also check if one contains the other (for missing characters)
+            if (serial_number_norm in excel_serial or excel_serial in serial_number_norm) and len(excel_serial) >= 8:
+                similarity = max(similarity, 0.9)
+            
+            if similarity > best_similarity and similarity >= min_similarity_threshold:
+                best_similarity = similarity
+                best_match = excel_serial
+        
+        if best_match:
+            logger.info(f"Found fuzzy match: {best_match} (similarity: {best_similarity:.2f})")
+            fuzzy_rows = df[df['serial_normalized'] == best_match]
+            
+            if len(fuzzy_rows) > 0:
+                product_name = None
+                product_description = None
+                
+                if product_name_column and product_name_column in fuzzy_rows.columns:
+                    product_name = fuzzy_rows.iloc[0][product_name_column]
+                
+                if product_desc_column and product_desc_column in fuzzy_rows.columns:
+                    product_description = fuzzy_rows.iloc[0][product_desc_column]
+                
+                return True, product_name, product_description
+        
+        logger.info("No exact or fuzzy match found")
         return False, None, None
         
     except Exception as e:
@@ -294,18 +339,42 @@ def extract_serial_from_image(image_file):
         
         # Fix common OCR mistakes before processing
         corrected_text = text.upper()
-        # Common OCR corrections
+        
+        # Apply OCR corrections strategically based on position and context
+        # First, fix obvious number mistakes at the beginning
+        if corrected_text.startswith('S'):
+            corrected_text = '5' + corrected_text[1:]
+        
+        # Common OCR corrections for the rest
         ocr_corrections = {
-            'S': '5',  # S often misread as 5
             'O': '0',  # O often misread as 0
             'I': '1',  # I often misread as 1
-            'Z': '2',  # Z sometimes misread as 2
             'B': '8',  # B sometimes misread as 8
         }
         
-        # Apply corrections to potential numbers at start
+        # Apply general corrections
         for mistake, correction in ocr_corrections.items():
             corrected_text = corrected_text.replace(mistake, correction)
+        
+        # Fix specific patterns that are commonly misread
+        # Fix "2" back to "Z" in letter contexts (after KRW, common in serials)
+        corrected_text = re.sub(r'KRW2', 'KRWZ', corrected_text)
+        corrected_text = re.sub(r'([A-Z]{2,3})2([0-9]{4,})', r'\1Z\2', corrected_text)
+        
+        # Try multiple OCR configurations for better accuracy
+        try:
+            # Alternative OCR with different settings
+            alt_text = pytesseract.image_to_string(pil_image, config='--psm 8 --oem 3')
+            if alt_text and len(alt_text.strip()) > len(text.strip()):
+                logger.info(f"Using alternative OCR result: {alt_text.strip()}")
+                alt_corrected = alt_text.upper()
+                if alt_corrected.startswith('S'):
+                    alt_corrected = '5' + alt_corrected[1:]
+                # Use the longer result if it seems better
+                if len(re.sub(r'[^A-Z0-9]', '', alt_corrected)) > len(re.sub(r'[^A-Z0-9]', '', corrected_text)):
+                    corrected_text = alt_corrected
+        except:
+            pass
         
         logger.info(f"OCR text after corrections: {corrected_text}")
         

@@ -309,9 +309,20 @@ def check_serial_in_excel(serial_number, excel_url):
         traceback.print_exc()
         return False, None, None
 
-# Simple OCR function (if available)
+# Enhanced OCR function
 def extract_serial_from_image(image_file):
-    """Extract serial number from image if OCR is available"""
+    """Extract serial number from image using enhanced OCR"""
+    try:
+        # Try to use enhanced OCR first
+        from enhanced_ocr import enhanced_ocr
+        return enhanced_ocr.extract_serial_number(image_file)
+    except ImportError:
+        # Fallback to basic OCR if enhanced not available
+        logger.warning("Enhanced OCR not available, using basic OCR")
+        return basic_extract_serial_from_image(image_file)
+
+def basic_extract_serial_from_image(image_file):
+    """Fallback basic OCR function"""
     if not OCR_AVAILABLE:
         return None, "OCR functionality is not available"
     
@@ -319,6 +330,7 @@ def extract_serial_from_image(image_file):
         import cv2
         import numpy as np
         from PIL import Image
+        import pytesseract
         
         # Read and process the image
         file_bytes = np.frombuffer(image_file.read(), np.uint8)
@@ -327,101 +339,41 @@ def extract_serial_from_image(image_file):
         if image is None:
             return None, "Could not read image file"
         
-        # Convert to grayscale and apply simple preprocessing
+        # Basic preprocessing
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        
-        # Apply threshold to get black and white
         _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        
-        # Convert to PIL Image for OCR
         pil_image = Image.fromarray(thresh)
         
-        # Extract text using Tesseract
+        # Extract text
         text = pytesseract.image_to_string(pil_image, config='--psm 6')
         
         if not text.strip():
             return None, "No text found in image"
         
-        logger.info(f"OCR extracted raw text: {text.strip()}")
-        
-        # Fix common OCR mistakes before processing
+        # Basic corrections
         corrected_text = text.upper()
-        
-        # Apply OCR corrections strategically based on position and context
-        # First, fix obvious number mistakes at the beginning
         if corrected_text.startswith('S'):
             corrected_text = '5' + corrected_text[1:]
         
-        # Common OCR corrections for the rest
-        ocr_corrections = {
-            'O': '0',  # O often misread as 0
-            'I': '1',  # I often misread as 1
-            'B': '8',  # B sometimes misread as 8
-        }
-        
-        # Apply general corrections
-        for mistake, correction in ocr_corrections.items():
-            corrected_text = corrected_text.replace(mistake, correction)
-        
-        # Fix specific patterns that are commonly misread
-        # Fix "2" back to "Z" in letter contexts (after KRW, common in serials)
         corrected_text = re.sub(r'KRW2', 'KRWZ', corrected_text)
-        corrected_text = re.sub(r'([A-Z]{2,3})2([0-9]{4,})', r'\1Z\2', corrected_text)
-        
-        # Try multiple OCR configurations for better accuracy
-        try:
-            # Alternative OCR with different settings
-            alt_text = pytesseract.image_to_string(pil_image, config='--psm 8 --oem 3')
-            if alt_text and len(alt_text.strip()) > len(text.strip()):
-                logger.info(f"Using alternative OCR result: {alt_text.strip()}")
-                alt_corrected = alt_text.upper()
-                if alt_corrected.startswith('S'):
-                    alt_corrected = '5' + alt_corrected[1:]
-                # Use the longer result if it seems better
-                if len(re.sub(r'[^A-Z0-9]', '', alt_corrected)) > len(re.sub(r'[^A-Z0-9]', '', corrected_text)):
-                    corrected_text = alt_corrected
-        except:
-            pass
-        
-        logger.info(f"OCR text after corrections: {corrected_text}")
-        
-        # Clean the text and look for potential serial numbers
         cleaned_text = re.sub(r'[^A-Z0-9]', '', corrected_text)
         
-        # Enhanced patterns for serial numbers (order matters - most specific first)
+        # Pattern matching
         patterns = [
-            r'[0-9]{3}[A-Z]{2}[0-9A-Z]{5,8}',    # Format: 505KRWZ35633 (numbers + letters + mixed)
-            r'[0-9]{2,4}[A-Z0-9]{6,12}',         # Format: 505KRWZ35633 or similar
-            r'[A-Z]{2,3}[0-9A-Z]{5,12}',         # Format: LGQM3WQF9Z
-            r'LG[0-9A-Z]{5,12}',                 # Starting with LG
-            r'[0-9][A-Z0-9]{7,14}',              # Starting with number
-            r'[A-Z0-9]{8,15}'                    # General alphanumeric (8-15 chars)
+            r'[0-9]{3}[A-Z]{2}[0-9A-Z]{5,8}',
+            r'[0-9]{2,4}[A-Z0-9]{6,12}',
+            r'[A-Z0-9]{8,15}'
         ]
         
         for pattern in patterns:
             matches = re.findall(pattern, cleaned_text)
             if matches:
-                # Return the longest match (most likely to be complete)
-                best_match = max(matches, key=len)
-                logger.info(f"Found serial with pattern {pattern}: {best_match}")
-                return best_match, f"Extracted from text: {text.strip()}"
-        
-        # If no pattern matched, try to extract from the longest alphanumeric string
-        words = corrected_text.split()
-        alphanumeric = [re.sub(r'[^A-Z0-9]', '', word) for word in words]
-        alphanumeric = [word for word in alphanumeric if word and len(word) >= 6]
-        
-        if alphanumeric:
-            # Sort by length descending, then return the longest
-            alphanumeric.sort(key=len, reverse=True)
-            best_candidate = alphanumeric[0]
-            logger.info(f"Using longest alphanumeric string: {best_candidate}")
-            return best_candidate, f"Extracted from text: {text.strip()}"
+                return max(matches, key=len), f"Extracted from text: {text.strip()}"
         
         return None, f"Could not identify serial number in text: {text.strip()}"
         
     except Exception as e:
-        logger.error(f"Error during OCR: {str(e)}")
+        logger.error(f"Error during basic OCR: {str(e)}")
         return None, f"Error processing image: {str(e)}"
 
 @app.route('/')

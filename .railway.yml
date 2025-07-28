@@ -1,0 +1,12 @@
+build:
+  docker:
+    dockerfile: Dockerfile
+deploy:
+  startCommand: python app.py
+  healthcheckPath: /health
+  healthcheckTimeout: 10
+environments:
+  production:
+    variables:
+      FLASK_ENV: production
+      PYTHONUNBUFFERED: "1" 

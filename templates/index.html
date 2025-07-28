@@ -27,45 +27,78 @@
                         <h2 class="lang-ar" style="display: none;">التحقق من منتجات إل جي سوريا</h2>
                     </div>
                     <div class="card-body">
-                        <!-- Manual Serial Number Input -->
-                        <div class="mb-4">
-                            <h4 class="lang-en">Enter Serial Number</h4>
-                            <h4 class="lang-ar" style="display: none;">أدخل الرقم التسلسلي</h4>
+                        <!-- Manual Serial Number Input - Made more prominent -->
+                        <div class="mb-4 p-3 border rounded bg-light">
+                            <h4 class="lang-en text-primary"><i class="bi bi-keyboard"></i> Enter Serial Number (Recommended)</h4>
+                            <h4 class="lang-ar text-primary" style="display: none;"><i class="bi bi-keyboard"></i> أدخل الرقم التسلسلي (موصى به)</h4>
+                            <p class="text-muted small lang-en">Type the serial number directly for fastest and most accurate results</p>
+                            <p class="text-muted small lang-ar" style="display: none;">اكتب الرقم التسلسلي مباشرة للحصول على أسرع وأدق النتائج</p>
                             <div class="input-group">
-                                <input type="text" id="serialNumber" class="form-control" placeholder="Enter product serial number">
-                                <button class="btn btn-primary lang-en" onclick="checkSerial()">Verify</button>
-                                <button class="btn btn-primary lang-ar" style="display: none;" onclick="checkSerial()">تحقق</button>
+                                <input type="text" id="serialNumber" class="form-control form-control-lg" placeholder="Enter product serial number" maxlength="20">
+                                <button class="btn btn-primary btn-lg lang-en" onclick="checkSerial()">
+                                    <i class="bi bi-search"></i> Verify
+                                </button>
+                                <button class="btn btn-primary btn-lg lang-ar" style="display: none;" onclick="checkSerial()">
+                                    <i class="bi bi-search"></i> تحقق
+                                </button>
                             </div>
                         </div>
 
                         <div class="separator text-center mb-4">
-                            <span class="lang-en">OR</span>
-                            <span class="lang-ar" style="display: none;">أو</span>
+                            <hr class="my-2">
+                            <small class="text-muted bg-white px-3">
+                                <span class="lang-en">OR</span>
+                                <span class="lang-ar" style="display: none;">أو</span>
+                            </small>
                         </div>
 
                         <!-- Serial Number Image Upload -->
                         <div class="mb-4">
-                            <h4 class="lang-en">Upload Serial Number Image</h4>
-                            <h4 class="lang-ar" style="display: none;">تحميل صورة الرقم التسلسلي</h4>
-                            <p class="text-muted small lang-en">Upload a clear image of the product serial number and we'll extract it automatically</p>
-                            <p class="text-muted small lang-ar" style="display: none;">قم بتحميل صورة واضحة للرقم التسلسلي للمنتج وسنقوم باستخراجه تلقائيًا</p>
+                            <h4 class="lang-en"><i class="bi bi-image"></i> Upload Serial Number Image</h4>
+                            <h4 class="lang-ar" style="display: none;"><i class="bi bi-image"></i> تحميل صورة الرقم التسلسلي</h4>
+                            
+                            <!-- OCR Status Alert -->
+                            <div class="alert alert-info" role="alert">
+                                <i class="bi bi-info-circle"></i>
+                                <span class="lang-en">
+                                    <strong>Note:</strong> Image processing may not always work perfectly. 
+                                    For best results, please enter the serial number manually above.
+                                </span>
+                                <span class="lang-ar" style="display: none;">
+                                    <strong>ملاحظة:</strong> قد لا تعمل معالجة الصور بشكل مثالي دائماً. 
+                                    للحصول على أفضل النتائج، يرجى إدخال الرقم التسلسلي يدوياً أعلاه.
+                                </span>
+                            </div>
                             
                             <div class="row">
                                 <div class="col-md-8 mb-2">
                                     <div class="input-group">
                                         <input type="file" id="serialImage" class="form-control" accept="image/*">
-                                        <button class="btn btn-primary lang-en" onclick="uploadSerialImage()">Upload & Verify</button>
-                                        <button class="btn btn-primary lang-ar" style="display: none;" onclick="uploadSerialImage()">تحميل وتحقق</button>
+                                        <button class="btn btn-outline-primary lang-en" onclick="uploadSerialImage()">
+                                            <i class="bi bi-upload"></i> Upload & Verify
+                                        </button>
+                                        <button class="btn btn-outline-primary lang-ar" style="display: none;" onclick="uploadSerialImage()">
+                                            <i class="bi bi-upload"></i> تحميل وتحقق
+                                        </button>
                                     </div>
                                 </div>
                                 <div class="col-md-4 mb-2">
-                                    <button id="cameraBtn" class="btn btn-secondary w-100">
+                                    <button id="cameraBtn" class="btn btn-outline-secondary w-100">
                                         <i class="bi bi-camera"></i> 
                                         <span class="lang-en">Use Camera</span>
                                         <span class="lang-ar" style="display: none;">استخدام الكاميرا</span>
                                     </button>
                                 </div>
                             </div>
+                            
+                            <small class="text-muted lang-en">
+                                <i class="bi bi-lightbulb"></i> 
+                                Tip: Make sure the serial number is clearly visible and well-lit in the image
+                            </small>
+                            <small class="text-muted lang-ar" style="display: none;">
+                                <i class="bi bi-lightbulb"></i> 
+                                نصيحة: تأكد من أن الرقم التسلسلي واضح ومضاء جيداً في الصورة
+                            </small>
                         </div>
 
                         <!-- Result Display -->

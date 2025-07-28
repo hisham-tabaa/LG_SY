@@ -1,18 +1,13 @@
-from flask import Flask, render_template, request, jsonify, session
-import cv2
-import numpy as np
+from flask import Flask, render_template, request, jsonify
 import pandas as pd
 import requests
 from io import BytesIO
 import os
-import sys
+import logging
+import re
 import traceback
 from dotenv import load_dotenv
 import urllib.parse
-import logging
-import re
-import subprocess
-from PIL import ImageEnhance, ImageFilter
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -24,7 +19,7 @@ translations = {
         'success': 'This product is from LG Syria',
         'not_found': 'Product not found',
         'error_excel': 'Excel URL not configured',
-        'error_ocr': 'Could not extract serial number from image',
+        'error_ocr': 'Image processing is currently unavailable. Please enter the serial number manually.',
         'error_file': 'No file uploaded',
         'product_details': 'Product Details',
         'serial_number': 'Serial Number',
@@ -35,7 +30,7 @@ translations = {
         'success': 'هذا المنتج من إل جي سوريا',
         'not_found': 'المنتج غير موجود',
         'error_excel': 'لم يتم تكوين عنوان URL لملف Excel',
-        'error_ocr': 'لم نتمكن من استخراج الرقم التسلسلي من الصورة',
+        'error_ocr': 'معالجة الصور غير متاحة حاليًا. يرجى إدخال الرقم التسلسلي يدويًا.',
         'error_file': 'لم يتم تحميل أي ملف',
         'product_details': 'تفاصيل المنتج',
         'serial_number': 'الرقم التسلسلي',
@@ -44,46 +39,24 @@ translations = {
     }
 }
 
-# Check if tesseract is installed
-def check_tesseract_installed():
-    try:
-        # Try to run tesseract command
-        result = subprocess.run(['tesseract', '--version'], 
-                               stdout=subprocess.PIPE, 
-                               stderr=subprocess.PIPE, 
-                               text=True, 
-                               check=False)
-        if result.returncode == 0:
-            logger.info(f"Tesseract found: {result.stdout.strip()}")
-            return True
-        else:
-            logger.warning(f"Tesseract check failed: {result.stderr}")
-            return False
-    except Exception as e:
-        logger.warning(f"Error checking tesseract: {str(e)}")
-        return False
-
-# Initialize OCR
-tesseract_installed = check_tesseract_installed()
+# Simple OCR availability check (simplified)
 try:
     import pytesseract
-    from PIL import Image
-    # Test if pytesseract can actually access tesseract
-    if tesseract_installed:
-        try:
-            pytesseract.get_tesseract_version()
-            OCR_AVAILABLE = True
-            logger.info("OCR functionality is available")
-        except Exception as e:
-            logger.warning(f"pytesseract could not access tesseract: {str(e)}")
-            OCR_AVAILABLE = False
+    import subprocess
+    # Quick check if tesseract is available
+    result = subprocess.run(['tesseract', '--version'], 
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+                           check=False, timeout=5)
+    OCR_AVAILABLE = result.returncode == 0
+    if OCR_AVAILABLE:
+        logger.info("OCR functionality is available")
     else:
-        OCR_AVAILABLE = False
-except ImportError:
+        logger.info("Tesseract not found - OCR functionality disabled")
+except Exception as e:
     OCR_AVAILABLE = False
-    logger.warning("pytesseract or PIL not available. OCR functionality will be disabled.")
+    logger.info(f"OCR functionality disabled: {str(e)}")
 
-# Load environment variables from .env file if it exists
+# Load environment variables
 if os.path.exists('.env'):
     load_dotenv()
 
@@ -95,7 +68,6 @@ if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-# Set secret key for session management
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-here')
 
 def get_message(key, lang='en'):
@@ -130,125 +102,14 @@ def validate_excel_url(url):
         # Try to make a HEAD request to check if the URL is accessible
         response = requests.head(url, allow_redirects=True, timeout=10)
         logger.info(f"URL validation response: {response.status_code}")
-        logger.info(f"Response headers: {dict(response.headers)}")
         
         return url, response.status_code == 200
     except Exception as e:
         logger.error(f"URL validation error: {str(e)}")
         return url, False
 
-def enhance_for_ocr(image):
-    # If image is small, upscale it
-    min_dim = min(image.shape[:2])
-    if min_dim < 100:
-        scale = 4 if min_dim < 50 else 2
-        image = cv2.resize(image, (image.shape[1]*scale, image.shape[0]*scale), interpolation=cv2.INTER_CUBIC)
-    # Convert to grayscale
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    # Apply adaptive thresholding
-    gray = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-    # Denoise
-    gray = cv2.fastNlMeansDenoising(gray, None, 30, 7, 21)
-    # Convert to PIL for further enhancement
-    pil_img = Image.fromarray(gray)
-    # Increase contrast
-    pil_img = ImageEnhance.Contrast(pil_img).enhance(2.5)
-    # Sharpen
-    pil_img = pil_img.filter(ImageFilter.SHARPEN)
-    # Convert back to OpenCV
-    image = cv2.cvtColor(np.array(pil_img), cv2.COLOR_GRAY2BGR)
-    return image
-
-def extract_text_from_image(image):
-    """Extract text from image using OCR"""
-    if not OCR_AVAILABLE:
-        logger.warning("OCR functionality is not available")
-        return None
-    try:
-        # Convert OpenCV image to PIL format if needed
-        if isinstance(image, np.ndarray):
-            # Convert BGR to RGB or keep grayscale
-            if len(image.shape) == 3 and image.shape[2] == 3:
-                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            pil_image = Image.fromarray(image)
-        else:
-            pil_image = image
-        # Try different PSM/OEM configs, no char whitelist
-        configs = [
-            '--psm 6 --oem 3',
-            '--psm 7 --oem 3',
-            '--psm 8 --oem 3',
-            '--psm 11 --oem 3',
-            '--psm 13 --oem 3',
-        ]
-        all_texts = []
-        for config in configs:
-            try:
-                text = pytesseract.image_to_string(pil_image, lang='eng', config=config)
-                text = text.strip()
-                if text:
-                    all_texts.append(f"[{config}] {text}")
-                    logger.info(f"Extracted text with config {config}: {text}")
-            except Exception as e:
-                logger.warning(f"OCR failed with config {config}: {str(e)}")
-        # If we got any text, return the longest one
-        if all_texts:
-            # Sort by length, descending
-            all_texts.sort(key=lambda x: len(x), reverse=True)
-            # Return just the text part (not config)
-            return all_texts[0].split('] ', 1)[-1]
-        # If all methods failed, return None
-        return None
-    except Exception as e:
-        logger.error(f"Error during OCR: {str(e)}")
-        traceback.print_exc(file=sys.stdout)
-        return None
-
-def extract_serial_number_from_text(text):
-    """Extract potential serial number from OCR text"""
-    if not text:
-        return None
-    
-    # Clean the text - remove spaces and special characters
-    cleaned_text = re.sub(r'[^A-Z0-9]', '', text.upper())
-    logger.info(f"Cleaned text for serial extraction: {cleaned_text}")
-    
-    # If the cleaned text looks like a serial number directly, use it
-    if len(cleaned_text) >= 8 and len(cleaned_text) <= 15:
-        logger.info(f"Using cleaned text as serial: {cleaned_text}")
-        return cleaned_text
-        
-    # Common patterns for serial numbers (adjust based on your specific format)
-    patterns = [
-        r'[A-Z]{2,3}[0-9A-Z]{5,12}',  # Format like: LGQM3WQF9Z
-        r'LG[0-9A-Z]{5,12}',          # Starting with LG
-        r'[A-Z]{2,3}[0-9]{5,8}[A-Z0-9]{1,4}',  # Format like: LG12345678A
-        r'[0-9]{5,15}',               # Just numbers
-        r'[A-Z0-9]{8,15}'             # Alphanumeric
-    ]
-    
-    # Try to find patterns in the original text
-    for pattern in patterns:
-        matches = re.findall(pattern, cleaned_text)
-        if matches:
-            # Return the first match
-            logger.info(f"Found potential serial number: {matches[0]}")
-            return matches[0]
-            
-    # If no pattern matched, try to find the longest alphanumeric string
-    words = text.split()
-    alphanumeric = [re.sub(r'[^A-Z0-9]', '', word.upper()) for word in words]
-    alphanumeric = [word for word in alphanumeric if word and len(word) >= 4]
-    
-    if alphanumeric:
-        # Sort by length, descending
-        alphanumeric.sort(key=len, reverse=True)
-        logger.info(f"Using longest alphanumeric string as serial: {alphanumeric[0]}")
-        return alphanumeric[0]
-        
-    return None
-
 def normalize_serial(s):
+    """Normalize serial number for comparison"""
     if not isinstance(s, str):
         s = str(s)
     return ''.join(s.split()).upper()
@@ -269,21 +130,13 @@ def read_excel_file(content):
     except Exception as e:
         exceptions.append(f"xlrd error: {str(e)}")
     
-    # Try with different encodings
-    for encoding in ['utf-8', 'utf-16', 'cp1256', 'iso-8859-6', 'windows-1256']:
-        try:
-            logger.info(f"Trying to read Excel with encoding: {encoding}")
-            return pd.read_excel(BytesIO(content), engine='openpyxl', encoding=encoding)
-        except Exception as e:
-            exceptions.append(f"{encoding} encoding error: {str(e)}")
-    
     # If both fail, raise the last exception with details
-    raise Exception(f"Failed to read Excel file with all engines and encodings. Errors: {'; '.join(exceptions)}")
+    raise Exception(f"Failed to read Excel file. Errors: {'; '.join(exceptions)}")
 
 def check_serial_in_excel(serial_number, excel_url):
+    """Check if serial number exists in Excel file"""
     try:
         logger.info(f"Checking serial number: {serial_number}")
-        logger.info(f"Original Excel URL: {excel_url}")
         
         # Validate and potentially fix the URL
         excel_url, is_valid = validate_excel_url(excel_url)
@@ -300,206 +153,173 @@ def check_serial_in_excel(serial_number, excel_url):
         })
         
         # Read Excel file from URL
-        try:
-            response = session.get(excel_url, timeout=30)
-            logger.info(f"Excel response status: {response.status_code}")
-            logger.info(f"Response headers: {dict(response.headers)}")
-            logger.info(f"Response content type: {response.headers.get('content-type', 'unknown')}")
-            
-            if response.status_code != 200:
-                logger.warning(f"Failed to fetch Excel file. Status code: {response.status_code}")
-                logger.warning(f"Response text: {response.text[:500]}...")
-                return False, None, None
-            
-            # Try to read the Excel file using our helper function
-            try:
-                df = read_excel_file(response.content)
-                logger.info(f"Successfully read Excel file")
-                logger.info(f"Excel columns: {df.columns.tolist()}")
-                logger.info(f"First few rows: {df.head().to_dict()}")
-                
-                # Log all column names for debugging
-                logger.info(f"All column names: {df.columns.tolist()}")
-                
-                # Clean up column names by removing whitespace
-                # But keep original case for Arabic characters
-                df.columns = [col.strip() for col in df.columns]
-                
-                # Create a case-insensitive mapping for column names
-                column_map = {col.lower(): col for col in df.columns}
-                logger.info(f"Column map: {column_map}")
-                
-                # Look for serial number column with various possible names
-                serial_column = None
-                possible_serial_names = ['serialnumber', 'serial_number', 'serial', 'serial no', 'serial_no', 'الرقم التسلسلي', 'رقم تسلسلي', 'الرقم_التسلسلي']
-                
-                for name in possible_serial_names:
-                    # Try exact match first
-                    if name in df.columns:
-                        serial_column = name
-                        logger.info(f"Found serial column by exact match: {serial_column}")
-                        break
-                    # Try case-insensitive match
-                    elif name.lower() in column_map:
-                        serial_column = column_map[name.lower()]
-                        logger.info(f"Found serial column by case-insensitive match: {serial_column}")
-                        break
-                
-                if serial_column is None:
-                    # Last resort: try to find any column that contains "serial" or "رقم"
-                    for col in df.columns:
-                        if "serial" in col.lower() or "رقم" in col:
-                            serial_column = col
-                            logger.info(f"Found serial column by partial match: {serial_column}")
-                            break
-                
-                if serial_column is None:
-                    logger.warning("No serial number column found. Available columns: " + ", ".join(df.columns))
-                    return False, None, None
-                
-                # Look for product name column
-                product_name_column = None
-                possible_name_columns = ['product_name', 'name', 'productname', 'product', 'اسم المنتج', 'المنتج', 'اسم_المنتج']
-                
-                for name in possible_name_columns:
-                    # Try exact match first
-                    if name in df.columns:
-                        product_name_column = name
-                        break
-                    # Try case-insensitive match
-                    elif name.lower() in column_map:
-                        product_name_column = column_map[name.lower()]
-                        break
-                
-                if product_name_column is None:
-                    # Try to find any column that contains "name" or "اسم"
-                    for col in df.columns:
-                        if "name" in col.lower() or "اسم" in col:
-                            product_name_column = col
-                            break
-                
-                # Look for product description column
-                product_desc_column = None
-                possible_desc_columns = ['description', 'product_description', 'desc', 'details', 'وصف المنتج', 'التفاصيل', 'وصف_المنتج']
-                
-                for name in possible_desc_columns:
-                    # Try exact match first
-                    if name in df.columns:
-                        product_desc_column = name
-                        break
-                    # Try case-insensitive match
-                    elif name.lower() in column_map:
-                        product_desc_column = column_map[name.lower()]
-                        break
-                
-                if product_desc_column is None:
-                    # Try to find any column that contains "desc" or "وصف"
-                    for col in df.columns:
-                        if "desc" in col.lower() or "detail" in col.lower() or "وصف" in col or "تفاصيل" in col:
-                            product_desc_column = col
-                            break
-                
-                # Convert serial numbers to string for comparison and clean them
-                df[serial_column] = df[serial_column].astype(str).str.strip()
-                serial_number = str(serial_number).strip()
-                
-                # Normalize for robust matching
-                df[serial_column + '_norm'] = df[serial_column].apply(normalize_serial)
-                serial_number_norm = normalize_serial(serial_number)
-                logger.info(f"Normalized serial to search: {serial_number_norm}")
-                logger.info(f"Sample normalized serials: {df[serial_column + '_norm'].head(5).tolist()}")
-                
-                # Check if serial number exists in the Excel file (normalized)
-                matching_rows = df[df[serial_column + '_norm'] == serial_number_norm]
-                result = len(matching_rows) > 0
-                logger.info(f"Serial number found: {result}, matching rows: {len(matching_rows)}")
-                
-                if result:
-                    # Get the product details from the matching row
-                    product_name = None
-                    product_description = None
-                    
-                    if product_name_column:
-                        product_name = matching_rows.iloc[0][product_name_column]
-                        logger.info(f"Found product name: {product_name}")
-                    
-                    if product_desc_column:
-                        product_description = matching_rows.iloc[0][product_desc_column]
-                        logger.info(f"Found product description: {product_description}")
-                    
-                    logger.info(f"Product details found - Name: {product_name}, Description: {product_description}")
-                    return True, product_name, product_description
-                
-                # If still not found, try a more flexible approach
-                for idx, row in df.iterrows():
-                    if normalize_serial(row[serial_column]) == serial_number_norm:
-                        logger.info(f"Found match using iterrows at index {idx}")
-                        product_name = row[product_name_column] if product_name_column else None
-                        product_description = row[product_desc_column] if product_desc_column else None
-                        return True, product_name, product_description
-                
-                return False, None, None
-                
-            except Exception as e:
-                logger.error(f"Error parsing Excel file: {str(e)}")
-                traceback.print_exc(file=sys.stdout)
-                return False, None, None
-                
-        except requests.exceptions.Timeout:
-            logger.warning("Request timed out while fetching Excel file")
+        response = session.get(excel_url, timeout=30)
+        logger.info(f"Excel response status: {response.status_code}")
+        
+        if response.status_code != 200:
+            logger.warning(f"Failed to fetch Excel file. Status code: {response.status_code}")
             return False, None, None
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Request failed: {str(e)}")
+        
+        # Try to read the Excel file
+        df = read_excel_file(response.content)
+        logger.info(f"Successfully read Excel file with {len(df)} rows")
+        logger.info(f"Excel columns: {df.columns.tolist()}")
+        
+        # Clean up column names by removing whitespace
+        df.columns = [col.strip() for col in df.columns]
+        
+        # Create a case-insensitive mapping for column names
+        column_map = {col.lower(): col for col in df.columns}
+        
+        # Look for serial number column with various possible names
+        serial_column = None
+        possible_serial_names = ['serialnumber', 'serial_number', 'serial', 'serial no', 'serial_no', 
+                               'الرقم التسلسلي', 'رقم تسلسلي', 'الرقم_التسلسلي']
+        
+        for name in possible_serial_names:
+            # Try exact match first
+            if name in df.columns:
+                serial_column = name
+                break
+            # Try case-insensitive match
+            elif name.lower() in column_map:
+                serial_column = column_map[name.lower()]
+                break
+        
+        if serial_column is None:
+            # Last resort: try to find any column that contains "serial" or "رقم"
+            for col in df.columns:
+                if "serial" in col.lower() or "رقم" in col:
+                    serial_column = col
+                    break
+        
+        if serial_column is None:
+            logger.warning("No serial number column found. Available columns: " + ", ".join(df.columns))
             return False, None, None
+        
+        # Look for product name column
+        product_name_column = None
+        possible_name_columns = ['product_name', 'name', 'productname', 'product', 
+                               'اسم المنتج', 'المنتج', 'اسم_المنتج']
+        
+        for name in possible_name_columns:
+            if name in df.columns:
+                product_name_column = name
+                break
+            elif name.lower() in column_map:
+                product_name_column = column_map[name.lower()]
+                break
+        
+        # Look for product description column
+        product_desc_column = None
+        possible_desc_columns = ['description', 'product_description', 'desc', 'details', 
+                               'وصف المنتج', 'التفاصيل', 'وصف_المنتج']
+        
+        for name in possible_desc_columns:
+            if name in df.columns:
+                product_desc_column = name
+                break
+            elif name.lower() in column_map:
+                product_desc_column = column_map[name.lower()]
+                break
+        
+        # Convert serial numbers to string for comparison and clean them
+        df[serial_column] = df[serial_column].astype(str).str.strip()
+        serial_number = str(serial_number).strip()
+        
+        # Normalize for robust matching
+        df['serial_normalized'] = df[serial_column].apply(normalize_serial)
+        serial_number_norm = normalize_serial(serial_number)
+        logger.info(f"Normalized serial to search: {serial_number_norm}")
+        
+        # Check if serial number exists in the Excel file (normalized)
+        matching_rows = df[df['serial_normalized'] == serial_number_norm]
+        result = len(matching_rows) > 0
+        logger.info(f"Serial number found: {result}")
+        
+        if result:
+            # Get the product details from the matching row
+            product_name = None
+            product_description = None
             
+            if product_name_column and product_name_column in matching_rows.columns:
+                product_name = matching_rows.iloc[0][product_name_column]
+            
+            if product_desc_column and product_desc_column in matching_rows.columns:
+                product_description = matching_rows.iloc[0][product_desc_column]
+            
+            return True, product_name, product_description
+        
+        return False, None, None
+        
     except Exception as e:
         logger.error(f"Error checking serial number: {str(e)}")
-        traceback.print_exc(file=sys.stdout)
+        traceback.print_exc()
         return False, None, None
 
-def fix_image_orientation(image):
-    """Fix image orientation based on EXIF data"""
+# Simple OCR function (if available)
+def extract_serial_from_image(image_file):
+    """Extract serial number from image if OCR is available"""
+    if not OCR_AVAILABLE:
+        return None, "OCR functionality is not available"
+    
     try:
-        # If image is already a numpy array (OpenCV image)
-        if isinstance(image, np.ndarray):
-            # Convert to PIL Image for EXIF processing
-            pil_image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-            
-            # Check if the image has EXIF data
-            if hasattr(pil_image, '_getexif') and pil_image._getexif() is not None:
-                exif = dict(pil_image._getexif().items())
-                
-                # EXIF orientation tag
-                orientation_tag = 274  # 0x0112
-                
-                if orientation_tag in exif:
-                    orientation = exif[orientation_tag]
-                    
-                    # Rotate the image according to EXIF orientation
-                    if orientation == 2:
-                        pil_image = pil_image.transpose(Image.FLIP_LEFT_RIGHT)
-                    elif orientation == 3:
-                        pil_image = pil_image.rotate(180)
-                    elif orientation == 4:
-                        pil_image = pil_image.rotate(180).transpose(Image.FLIP_LEFT_RIGHT)
-                    elif orientation == 5:
-                        pil_image = pil_image.rotate(-90, expand=True).transpose(Image.FLIP_LEFT_RIGHT)
-                    elif orientation == 6:
-                        pil_image = pil_image.rotate(-90, expand=True)
-                    elif orientation == 7:
-                        pil_image = pil_image.rotate(90, expand=True).transpose(Image.FLIP_LEFT_RIGHT)
-                    elif orientation == 8:
-                        pil_image = pil_image.rotate(90, expand=True)
-                    
-                    # Convert back to OpenCV format
-                    return cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
-            
-        # If no rotation needed or no EXIF data, return original image
-        return image
+        import cv2
+        import numpy as np
+        from PIL import Image
+        
+        # Read and process the image
+        file_bytes = np.frombuffer(image_file.read(), np.uint8)
+        image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        
+        if image is None:
+            return None, "Could not read image file"
+        
+        # Convert to grayscale and apply simple preprocessing
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        
+        # Apply threshold to get black and white
+        _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+        # Convert to PIL Image for OCR
+        pil_image = Image.fromarray(thresh)
+        
+        # Extract text using Tesseract
+        text = pytesseract.image_to_string(pil_image, config='--psm 6')
+        
+        if not text.strip():
+            return None, "No text found in image"
+        
+        # Simple serial number extraction - look for alphanumeric patterns
+        # Clean the text and look for potential serial numbers
+        cleaned_text = re.sub(r'[^A-Z0-9]', '', text.upper())
+        
+        # Look for patterns that might be serial numbers
+        patterns = [
+            r'[A-Z]{2,3}[0-9A-Z]{5,12}',  # Format like: LGQM3WQF9Z
+            r'LG[0-9A-Z]{5,12}',          # Starting with LG
+            r'[A-Z0-9]{8,15}'             # General alphanumeric
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, cleaned_text)
+            if matches:
+                return matches[0], f"Extracted from text: {text.strip()}"
+        
+        # If no pattern matched, return the longest alphanumeric string
+        words = text.split()
+        alphanumeric = [re.sub(r'[^A-Z0-9]', '', word.upper()) for word in words]
+        alphanumeric = [word for word in alphanumeric if word and len(word) >= 4]
+        
+        if alphanumeric:
+            alphanumeric.sort(key=len, reverse=True)
+            return alphanumeric[0], f"Extracted from text: {text.strip()}"
+        
+        return None, f"Could not identify serial number in text: {text.strip()}"
+        
     except Exception as e:
-        logger.warning(f"Error fixing image orientation: {str(e)}")
-        # Return original image if any error occurs
-        return image
+        logger.error(f"Error during OCR: {str(e)}")
+        return None, f"Error processing image: {str(e)}"
 
 @app.route('/')
 def index():
@@ -507,239 +327,29 @@ def index():
 
 @app.route('/health')
 def health():
-    """Health check endpoint for Railway"""
+    """Health check endpoint"""
     return jsonify({"status": "ok"}), 200
-
-@app.route('/debug/excel')
-def debug_excel():
-    """Debug endpoint to inspect Excel file"""
-    excel_url = os.getenv('EXCEL_URL')
-    if not excel_url:
-        return jsonify({'error': 'Excel URL not configured'}), 400
-        
-    try:
-        # Validate URL first
-        excel_url, is_valid = validate_excel_url(excel_url)
-        if not is_valid:
-            return jsonify({
-                'error': 'Invalid or inaccessible Excel URL',
-                'url_tried': excel_url
-            }), 400
-            
-        session = requests.Session()
-        session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        })
-        
-        response = session.get(excel_url, timeout=30)
-        logger.info(f"Excel file request status: {response.status_code}")
-        logger.info(f"Response headers: {dict(response.headers)}")
-        
-        if response.status_code != 200:
-            return jsonify({
-                'error': f'Failed to fetch Excel file. Status code: {response.status_code}',
-                'response_text': response.text[:500],
-                'headers': dict(response.headers),
-                'url_tried': excel_url
-            }), 400
-            
-        # Try to read the Excel file
-        try:
-            df = read_excel_file(response.content)
-            
-            # Store original columns
-            original_columns = df.columns.tolist()
-            
-            # Get basic info about the Excel file
-            info = {
-                'status': 'success',
-                'url': excel_url,
-                'original_columns': original_columns,
-                'rows': len(df),
-                'sample_data': df.head(5).to_dict(orient='records'),
-                'response_headers': dict(response.headers),
-                'content_type': response.headers.get('content-type', 'unknown')
-            }
-            
-            # Look for serial number column with various possible names
-            possible_serial_names = ['serialnumber', 'serial_number', 'serial', 'serial no', 'serial_no', 'الرقم التسلسلي', 'رقم تسلسلي', 'الرقم_التسلسلي']
-            found_serial_column = None
-            
-            # Try exact match first
-            for name in possible_serial_names:
-                if name in df.columns:
-                    found_serial_column = name
-                    break
-                    
-            # Try case-insensitive match if not found
-            if not found_serial_column:
-                for name in possible_serial_names:
-                    for col in df.columns:
-                        if name.lower() == col.lower():
-                            found_serial_column = col
-                            break
-                    if found_serial_column:
-                        break
-                        
-            # Try partial match if still not found
-            if not found_serial_column:
-                for col in df.columns:
-                    if "serial" in col.lower() or "رقم" in col:
-                        found_serial_column = col
-                        break
-            
-            # Add column information to the response
-            info['found_serial_column'] = found_serial_column
-            
-            if found_serial_column:
-                info['serial_column_type'] = str(df[found_serial_column].dtype)
-                info['serial_sample'] = df[found_serial_column].head(10).tolist()
-            else:
-                info['warning'] = f"No serial number column found. Available columns: {', '.join(df.columns)}"
-                
-            return jsonify(info)
-            
-        except Exception as e:
-            logger.error(f"Error parsing Excel file: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'error': 'Failed to parse Excel file',
-                'details': str(e),
-                'url_tried': excel_url,
-                'content_type': response.headers.get('content-type', 'unknown'),
-                'content_preview': response.content[:100].hex()  # First 100 bytes in hex
-            }), 500
-            
-    except requests.exceptions.Timeout:
-        return jsonify({
-            'error': 'Request timed out while fetching Excel file',
-            'url_tried': excel_url
-        }), 500
-    except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
-        logger.error(traceback.format_exc())
-        return jsonify({
-            'error': str(e),
-            'traceback': traceback.format_exc(),
-            'url_tried': excel_url
-        }), 500
-
-@app.route('/debug/check/<serial>')
-def debug_check_serial(serial):
-    """Debug endpoint to directly check a serial number"""
-    excel_url = os.getenv('EXCEL_URL')
-    if not excel_url:
-        return jsonify({'error': 'Excel URL not configured'}), 400
-    
-    try:
-        is_valid, product_name, product_description = check_serial_in_excel(serial, excel_url)
-        
-        response_data = {
-            'status': 'success',
-            'serial': serial,
-            'valid': is_valid,
-            'message': 'This product is from LG Syria' if is_valid else 'Product not found',
-            'excel_url': excel_url
-        }
-        
-        if is_valid:
-            response_data['product_name'] = product_name
-            response_data['product_description'] = product_description
-        
-        return jsonify(response_data)
-    except Exception as e:
-        logger.error(f"Error checking serial {serial}: {str(e)}")
-        logger.error(traceback.format_exc())
-        return jsonify({
-            'error': f'Failed to check serial number: {str(e)}',
-            'serial': serial,
-            'excel_url': excel_url
-        }), 500
-
-@app.route('/debug/excel_structure')
-def debug_excel_structure():
-    """Debug endpoint to directly view the Excel file structure"""
-    excel_url = os.getenv('EXCEL_URL')
-    if not excel_url:
-        return jsonify({'error': 'Excel URL not configured'}), 400
-        
-    try:
-        # Validate URL first
-        excel_url, is_valid = validate_excel_url(excel_url)
-        if not is_valid:
-            return jsonify({
-                'error': 'Invalid or inaccessible Excel URL',
-                'url_tried': excel_url
-            }), 400
-            
-        session = requests.Session()
-        session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        })
-        
-        response = session.get(excel_url, timeout=30)
-        
-        if response.status_code != 200:
-            return jsonify({
-                'error': f'Failed to fetch Excel file. Status code: {response.status_code}',
-                'url_tried': excel_url
-            }), 400
-            
-        # Try to read the Excel file
-        try:
-            df = read_excel_file(response.content)
-            
-            # Get detailed info about the Excel file
-            column_details = []
-            for col in df.columns:
-                column_details.append({
-                    'name': col,
-                    'lowercase_name': col.lower(),
-                    'sample_values': df[col].astype(str).head(5).tolist(),
-                    'data_type': str(df[col].dtype)
-                })
-            
-            # Return comprehensive information
-            return jsonify({
-                'status': 'success',
-                'url': excel_url,
-                'columns': df.columns.tolist(),
-                'column_details': column_details,
-                'rows_count': len(df),
-                'first_row': df.iloc[0].to_dict() if len(df) > 0 else None
-            })
-            
-        except Exception as e:
-            logger.error(f"Error parsing Excel file: {str(e)}")
-            return jsonify({
-                'error': 'Failed to parse Excel file',
-                'details': str(e),
-                'url_tried': excel_url
-            }), 500
-            
-    except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
-        return jsonify({
-            'error': str(e),
-            'url_tried': excel_url
-        }), 500
 
 @app.route('/check_serial', methods=['POST'])
 def check_serial():
+    """Check serial number manually entered by user"""
     serial_number = request.form.get('serial_number')
-    excel_url = os.getenv('EXCEL_URL')  # Get Excel URL from environment variable
+    excel_url = os.getenv('EXCEL_URL')
     lang = request.form.get('lang', 'en')
     
     if not excel_url:
         return jsonify({'error': get_message('error_excel', lang)}), 400
     
-    logger.info(f"Received request to check serial: {serial_number}")
-    is_valid, product_name, product_description = check_serial_in_excel(serial_number, excel_url)
+    if not serial_number or not serial_number.strip():
+        return jsonify({'error': 'Please enter a serial number'}), 400
+    
+    logger.info(f"Checking serial number: {serial_number}")
+    is_valid, product_name, product_description = check_serial_in_excel(serial_number.strip(), excel_url)
     
     response_data = {
         'valid': is_valid,
         'message': get_message('success' if is_valid else 'not_found', lang),
-        'serial_number': serial_number
+        'serial_number': serial_number.strip()
     }
     
     if is_valid:
@@ -750,7 +360,7 @@ def check_serial():
 
 @app.route('/upload_serial_image', methods=['POST'])
 def upload_serial_image():
-    """Extract serial number from an image using OCR"""
+    """Extract serial number from uploaded image"""
     if 'serial_image' not in request.files:
         lang = request.form.get('lang', 'en')
         return jsonify({'error': get_message('error_file', lang)}), 400
@@ -762,134 +372,40 @@ def upload_serial_image():
     if not excel_url:
         return jsonify({'error': get_message('error_excel', lang)}), 400
     
-    # Check if OCR is available
-    if not OCR_AVAILABLE:
-        logger.warning("OCR functionality is not available.")
-        return jsonify({'error': get_message('error_ocr', lang)}), 400
+    if not file or file.filename == '':
+        return jsonify({'error': get_message('error_file', lang)}), 400
     
-    # Read and process the image
-    file_bytes = np.frombuffer(file.read(), np.uint8)
-    image = cv2.imdecode(file_bytes, cv2.IMREAD_UNCHANGED)
+    # Try to extract serial number from image
+    serial_number, extraction_info = extract_serial_from_image(file)
     
-    # Fix image orientation if it's from a camera
-    image = fix_image_orientation(image)
-    # Enhance for OCR (upscale, contrast, sharpen)
-    image = enhance_for_ocr(image)
-    
-    # Resize image if too large
-    max_dim = 1000
-    if image.shape[0] > max_dim or image.shape[1] > max_dim:
-        scale = max_dim / max(image.shape[0], image.shape[1])
-        image = cv2.resize(image, (int(image.shape[1]*scale), int(image.shape[0]*scale)), interpolation=cv2.INTER_AREA)
-    
-    # Try to improve image quality for OCR
-    try:
-        # Store all extracted texts and serial numbers
-        results = []
-        
-        # Process original image
-        text_original = extract_text_from_image(image)
-        serial_original = extract_serial_number_from_text(text_original)
-        if serial_original:
-            results.append(("original", serial_original, text_original))
-        
-        # Convert to grayscale
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        
-        # Apply threshold to get black and white image
-        _, thresh1 = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
-        text_thresh1 = extract_text_from_image(thresh1)
-        serial_thresh1 = extract_serial_number_from_text(text_thresh1)
-        if serial_thresh1:
-            results.append(("threshold_binary", serial_thresh1, text_thresh1))
-        
-        # Try Otsu's thresholding
-        _, thresh2 = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        text_thresh2 = extract_text_from_image(thresh2)
-        serial_thresh2 = extract_serial_number_from_text(text_thresh2)
-        if serial_thresh2:
-            results.append(("threshold_otsu", serial_thresh2, text_thresh2))
-        
-        # Try adaptive thresholding
-        adaptive_thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                               cv2.THRESH_BINARY, 11, 2)
-        text_adaptive = extract_text_from_image(adaptive_thresh)
-        serial_adaptive = extract_serial_number_from_text(text_adaptive)
-        if serial_adaptive:
-            results.append(("adaptive_threshold", serial_adaptive, text_adaptive))
-            
-        # Try with resizing (sometimes helps OCR)
-        resized = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-        _, resized_thresh = cv2.threshold(resized, 150, 255, cv2.THRESH_BINARY)
-        text_resized = extract_text_from_image(resized_thresh)
-        serial_resized = extract_serial_number_from_text(text_resized)
-        if serial_resized:
-            results.append(("resized", serial_resized, text_resized))
-        
-        # Try with image rotation if no results yet (sometimes camera images are rotated)
-        if not results:
-            # Try rotating the image 90 degrees
-            rotated_90 = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
-            text_rotated_90 = extract_text_from_image(rotated_90)
-            serial_rotated_90 = extract_serial_number_from_text(text_rotated_90)
-            if serial_rotated_90:
-                results.append(("rotated_90", serial_rotated_90, text_rotated_90))
-                
-            # Try rotating the image 270 degrees
-            rotated_270 = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
-            text_rotated_270 = extract_text_from_image(rotated_270)
-            serial_rotated_270 = extract_serial_number_from_text(text_rotated_270)
-            if serial_rotated_270:
-                results.append(("rotated_270", serial_rotated_270, text_rotated_270))
-        
-        # Log all results for debugging
-        logger.info(f"All extracted serials: {results}")
-        
-        # Use the first valid serial number found
-        serial_number = None
-        extracted_text = None
-        if results:
-            serial_number = results[0][1]  # Take the first result
-            extracted_text = results[0][2]
-        
-        # If we still couldn't extract a serial number, return an error with all extracted texts
-        if not serial_number:
-            all_texts = f"Original: {text_original or 'None'}\n"
-            all_texts += f"Binary Threshold: {text_thresh1 or 'None'}\n"
-            all_texts += f"Otsu Threshold: {text_thresh2 or 'None'}\n"
-            all_texts += f"Adaptive Threshold: {text_adaptive or 'None'}\n"
-            all_texts += f"Resized: {text_resized or 'None'}"
-            return jsonify({
-                'error': get_message('error_ocr', lang),
-                'extracted_text': all_texts
-            }), 400
-        
-        # Check serial number in Excel
-        is_valid, product_name, product_description = check_serial_in_excel(serial_number, excel_url)
-        
-        response_data = {
-            'serial_number': serial_number,
-            'valid': is_valid,
-            'message': get_message('success' if is_valid else 'not_found', lang),
-            'extracted_text': extracted_text or '',
-        }
-        
-        if is_valid:
-            response_data['product_name'] = product_name
-            response_data['product_description'] = product_description
-        
-        return jsonify(response_data)
-        
-    except Exception as e:
-        logger.error(f"Error processing image: {str(e)}")
-        traceback.print_exc(file=sys.stdout)
+    if not serial_number:
         return jsonify({
             'error': get_message('error_ocr', lang),
-            'extracted_text': f"Error processing image: {str(e)}"
+            'extracted_text': extraction_info or 'Could not process image'
         }), 400
+    
+    # Check the extracted serial number
+    is_valid, product_name, product_description = check_serial_in_excel(serial_number, excel_url)
+    
+    response_data = {
+        'serial_number': serial_number,
+        'valid': is_valid,
+        'message': get_message('success' if is_valid else 'not_found', lang),
+        'extracted_text': extraction_info or ''
+    }
+    
+    if is_valid:
+        response_data['product_name'] = product_name
+        response_data['product_description'] = product_description
+    
+    return jsonify(response_data)
 
 if __name__ == '__main__':
     # Use environment variables for host and port if available
     port = int(os.getenv('PORT', 5000))
-    debug = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
+    debug = os.getenv('FLASK_ENV', 'production') == 'development'
+    
+    logger.info(f"Starting Flask app on port {port}")
+    logger.info(f"OCR Available: {OCR_AVAILABLE}")
+    
     app.run(host='0.0.0.0', port=port, debug=debug) 

@@ -1,53 +1,41 @@
+# Use Python 3.11 slim image
 FROM python:3.11-slim
 
-WORKDIR /app
-
-# Install system dependencies for OpenCV and Tesseract OCR
+# Install system dependencies including Tesseract OCR
 RUN apt-get update && apt-get install -y \
-    libgl1 \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    tesseract-ocr-ara \
+    libgl1-mesa-glx \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
     libxrender-dev \
-    tesseract-ocr \
-    libtesseract-dev \
-    tesseract-ocr-eng \
-    tesseract-ocr-osd \
-    wget \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Verify Tesseract installation
-RUN tesseract --version && \
-    tesseract --list-langs
+# Set working directory
+WORKDIR /app
 
-# Copy requirements first for better caching
+# Copy requirements first (for better caching)
 COPY requirements.txt .
+
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application
+# Copy application files
 COPY . .
 
 # Create uploads directory
 RUN mkdir -p static/uploads
 
+# Expose port
+EXPOSE 5000
+
 # Set environment variables
+ENV FLASK_APP=app.py
+ENV FLASK_ENV=production
 ENV PYTHONUNBUFFERED=1
-ENV PORT=8080
-# Set Tesseract configurations - use the correct path based on your Tesseract version
-ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr/4.00/tessdata
-# If the above path doesn't exist, try these alternatives:
-# ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr/tessdata
-# ENV TESSDATA_PREFIX=/usr/local/share/tesseract-ocr/tessdata
 
-# Create a script to start the application
-RUN echo '#!/bin/bash\n\
-echo "Testing Tesseract installation:"\n\
-tesseract --version\n\
-tesseract --list-langs\n\
-echo "Starting application..."\n\
-PORT="${PORT:-8080}"\n\
-exec gunicorn --bind "0.0.0.0:$PORT" app:app\n' > /app/start.sh && \
-    chmod +x /app/start.sh
-
-# Run the application
-CMD ["/app/start.sh"] 
+# Command to run the application
+CMD ["python", "app.py"] 

@@ -47,12 +47,18 @@ body.rtl {
     margin: 30px 0;
 }
 
+.separator hr {
+    border: 0;
+    height: 1px;
+    background: #dee2e6;
+    margin: 0;
+}
+
 .separator span {
-    background-color: white;
+    background: white;
     padding: 0 15px;
     color: #6c757d;
-    position: relative;
-    z-index: 1;
+    font-size: 14px;
 }
 
 .separator:before {
@@ -182,4 +188,79 @@ body.rtl {
     #cameraBtn {
         margin-bottom: 10px;
     }
+} 
+
+/* Enhanced styling for manual input section */
+.bg-light {
+    background-color: #f8f9fa !important;
+    border: 2px solid #e3f2fd !important;
+    transition: all 0.3s ease;
+}
+
+.bg-light:hover {
+    border-color: #bbdefb !important;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.form-control-lg {
+    font-size: 1.1rem;
+    padding: 12px 16px;
+}
+
+.btn-lg {
+    font-size: 1.1rem;
+    padding: 12px 24px;
+}
+
+/* Better button styling */
+.btn-outline-primary {
+    border-width: 2px;
+}
+
+.btn-outline-secondary {
+    border-width: 2px;
+}
+
+/* Alert styling improvements */
+.alert-info {
+    background-color: #e3f2fd;
+    border-color: #bbdefb;
+    color: #1565c0;
+}
+
+.alert-info .bi {
+    margin-right: 8px;
+}
+
+body.rtl .alert-info .bi {
+    margin-right: 0;
+    margin-left: 8px;
+}
+
+/* Icon styling */
+.bi {
+    font-size: 1.1em;
+    margin-right: 6px;
+}
+
+body.rtl .bi {
+    margin-right: 0;
+    margin-left: 6px;
+}
+
+/* Improved spacing for tips */
+.text-muted small {
+    display: block;
+    margin-top: 8px;
+    font-size: 0.9rem;
+}
+
+/* Loading spinner improvements */
+.spinner-border-sm {
+    margin-right: 8px;
+}
+
+body.rtl .spinner-border-sm {
+    margin-right: 0;
+    margin-left: 8px;
 } 

@@ -181,6 +181,7 @@ async function uploadSerialImage() {
         return;
     }
 
+    // Show information about image processing
     showLoading();
 
     try {
@@ -199,8 +200,8 @@ async function uploadSerialImage() {
             let extraInfo = null;
             if (data.serial_number) {
                 extraInfo = currentLanguage === 'en' ? 
-                    `Extracted serial number: ${data.serial_number}` : 
-                    `الرقم التسلسلي المستخرج: ${data.serial_number}`;
+                    `✓ Extracted serial number: ${data.serial_number}` : 
+                    `✓ الرقم التسلسلي المستخرج: ${data.serial_number}`;
                     
                 if (data.extracted_text) {
                     extraInfo += currentLanguage === 'en' ? 
@@ -222,15 +223,31 @@ async function uploadSerialImage() {
         } else {
             let errorMsg = data.error || translations[currentLanguage].processingError;
             let extraInfo = null;
+            
             if (data.extracted_text) {
                 extraInfo = currentLanguage === 'en' ? 
-                    `Extracted text: ${data.extracted_text}\n(Could not identify a valid serial number)` : 
-                    `النص المستخرج: ${data.extracted_text}\n(لم نتمكن من تحديد رقم تسلسلي صالح)`;
+                    `Extracted text: ${data.extracted_text}\n\n⚠️ Could not identify a valid serial number from this text.\nTip: Try entering the serial number manually for best results.` : 
+                    `النص المستخرج: ${data.extracted_text}\n\n⚠️ لم نتمكن من تحديد رقم تسلسلي صالح من هذا النص.\nنصيحة: جرب إدخال الرقم التسلسلي يدوياً للحصول على أفضل النتائج.`;
+            } else {
+                // Provide helpful guidance when OCR fails completely
+                extraInfo = currentLanguage === 'en' ? 
+                    `💡 Image processing tip:\n• Make sure the serial number is clearly visible\n• Ensure good lighting\n• Try taking a closer photo\n• For best results, enter the serial number manually` : 
+                    `💡 نصائح لمعالجة الصور:\n• تأكد من وضوح الرقم التسلسلي\n• تأكد من الإضاءة الجيدة\n• جرب التقاط صورة أقرب\n• للحصول على أفضل النتائج، أدخل الرقم التسلسلي يدوياً`;
             }
+            
             showResult(errorMsg, false, extraInfo);
         }
     } catch (error) {
-        showResult(translations[currentLanguage].processingError, false);
+        console.error('Error uploading image:', error);
+        const errorMsg = currentLanguage === 'en' ? 
+            'Failed to process image. Please try again or enter the serial number manually.' :
+            'فشل في معالجة الصورة. يرجى المحاولة مرة أخرى أو إدخال الرقم التسلسلي يدوياً.';
+        
+        const tipMsg = currentLanguage === 'en' ? 
+            '💡 For fastest and most accurate results, we recommend entering the serial number manually above.' :
+            '💡 للحصول على أسرع وأدق النتائج، نوصي بإدخال الرقم التسلسلي يدوياً أعلاه.';
+            
+        showResult(errorMsg, false, tipMsg);
     } finally {
         hideLoading();
         fileInput.value = ''; // Clear the file input

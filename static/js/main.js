@@ -132,15 +132,30 @@ async function checkSerial() {
         const data = await response.json();
         
         if (response.ok) {
+            // Format product information for display
+            let extraInfo = null;
+            let productInfo = null;
+            
+            if (data.valid) {
+                productInfo = {
+                    serial: data.serial_number,
+                    name: data.product_name || 'N/A',
+                    description: data.product_description || 'N/A'
+                };
+                
+                // Add product details to display
+                if (data.product_name || data.product_description) {
+                    extraInfo = currentLanguage === 'en' ? 
+                        `📋 Product Details:\n• Name: ${data.product_name || 'N/A'}\n• Code: ${data.product_description || 'N/A'}` :
+                        `📋 تفاصيل المنتج:\n• الاسم: ${data.product_name || 'غير متوفر'}\n• الكود: ${data.product_description || 'غير متوفر'}`;
+                }
+            }
+            
             showResult(
                 data.message, 
                 data.valid, 
-                null, 
-                data.valid ? {
-                    serial: data.serial_number,
-                    name: data.product_name,
-                    description: data.product_description
-                } : null
+                extraInfo, 
+                productInfo
             );
         } else {
             showResult(data.error || translations[currentLanguage].verifyError, false);
@@ -210,15 +225,29 @@ async function uploadSerialImage() {
                 }
             }
             
+            // Format product information for display
+            let productInfo = null;
+            if (data.valid) {
+                productInfo = {
+                    serial: data.serial_number,
+                    name: data.product_name || 'N/A',
+                    description: data.product_description || 'N/A'
+                };
+                
+                // Add product details to extra info
+                if (data.product_name || data.product_description) {
+                    const productDetails = currentLanguage === 'en' ? 
+                        `\n📋 Product Details:\n• Name: ${data.product_name || 'N/A'}\n• Code: ${data.product_description || 'N/A'}` :
+                        `\n📋 تفاصيل المنتج:\n• الاسم: ${data.product_name || 'غير متوفر'}\n• الكود: ${data.product_description || 'غير متوفر'}`;
+                    extraInfo = (extraInfo || '') + productDetails;
+                }
+            }
+            
             showResult(
                 data.message, 
                 data.valid, 
                 extraInfo, 
-                data.valid ? {
-                    serial: data.serial_number,
-                    name: data.product_name,
-                    description: data.product_description
-                } : null
+                productInfo
             );
         } else {
             let errorMsg = data.error || translations[currentLanguage].processingError;

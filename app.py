@@ -167,6 +167,7 @@ def check_serial_in_excel(serial_number, excel_url):
         
         # Clean up column names by removing whitespace
         df.columns = [col.strip() for col in df.columns]
+        logger.info(f"Cleaned Excel columns: {df.columns.tolist()}")
         
         # Create a case-insensitive mapping for column names
         column_map = {col.lower(): col for col in df.columns}
@@ -197,31 +198,37 @@ def check_serial_in_excel(serial_number, excel_url):
             logger.warning("No serial number column found. Available columns: " + ", ".join(df.columns))
             return False, None, None
         
-        # Look for product name column
+        # Look for product name column (اسم المادة)
         product_name_column = None
-        possible_name_columns = ['product_name', 'name', 'productname', 'product', 
-                               'اسم المنتج', 'المنتج', 'اسم_المنتج']
+        possible_name_columns = ['اسم المادة', 'اسم_المادة', 'product_name', 'name', 'productname', 'product']
         
         for name in possible_name_columns:
             if name in df.columns:
                 product_name_column = name
+                logger.info(f"Found product name column: {product_name_column}")
                 break
             elif name.lower() in column_map:
                 product_name_column = column_map[name.lower()]
+                logger.info(f"Found product name column (case-insensitive): {product_name_column}")
                 break
         
-        # Look for product description column
+        # Look for product code/description column (رمز المادة)
         product_desc_column = None
-        possible_desc_columns = ['description', 'product_description', 'desc', 'details', 
-                               'وصف المنتج', 'التفاصيل', 'وصف_المنتج']
+        possible_desc_columns = ['رمز المادة', 'رمز_المادة', 'product_code', 'material_code', 'code', 
+                               'description', 'product_description', 'desc']
         
         for name in possible_desc_columns:
             if name in df.columns:
                 product_desc_column = name
+                logger.info(f"Found product description/code column: {product_desc_column}")
                 break
             elif name.lower() in column_map:
                 product_desc_column = column_map[name.lower()]
+                logger.info(f"Found product description/code column (case-insensitive): {product_desc_column}")
                 break
+        
+        # Log final column assignments
+        logger.info(f"Column assignments - Serial: {serial_column}, Name: {product_name_column}, Description/Code: {product_desc_column}")
         
         # Convert serial numbers to string for comparison and clean them
         df[serial_column] = df[serial_column].astype(str).str.strip()

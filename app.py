@@ -290,30 +290,57 @@ def extract_serial_from_image(image_file):
         if not text.strip():
             return None, "No text found in image"
         
-        # Simple serial number extraction - look for alphanumeric patterns
-        # Clean the text and look for potential serial numbers
-        cleaned_text = re.sub(r'[^A-Z0-9]', '', text.upper())
+        logger.info(f"OCR extracted raw text: {text.strip()}")
         
-        # Look for patterns that might be serial numbers
+        # Fix common OCR mistakes before processing
+        corrected_text = text.upper()
+        # Common OCR corrections
+        ocr_corrections = {
+            'S': '5',  # S often misread as 5
+            'O': '0',  # O often misread as 0
+            'I': '1',  # I often misread as 1
+            'Z': '2',  # Z sometimes misread as 2
+            'B': '8',  # B sometimes misread as 8
+        }
+        
+        # Apply corrections to potential numbers at start
+        for mistake, correction in ocr_corrections.items():
+            corrected_text = corrected_text.replace(mistake, correction)
+        
+        logger.info(f"OCR text after corrections: {corrected_text}")
+        
+        # Clean the text and look for potential serial numbers
+        cleaned_text = re.sub(r'[^A-Z0-9]', '', corrected_text)
+        
+        # Enhanced patterns for serial numbers (order matters - most specific first)
         patterns = [
-            r'[A-Z]{2,3}[0-9A-Z]{5,12}',  # Format like: LGQM3WQF9Z
-            r'LG[0-9A-Z]{5,12}',          # Starting with LG
-            r'[A-Z0-9]{8,15}'             # General alphanumeric
+            r'[0-9]{3}[A-Z]{2}[0-9A-Z]{5,8}',    # Format: 505KRWZ35633 (numbers + letters + mixed)
+            r'[0-9]{2,4}[A-Z0-9]{6,12}',         # Format: 505KRWZ35633 or similar
+            r'[A-Z]{2,3}[0-9A-Z]{5,12}',         # Format: LGQM3WQF9Z
+            r'LG[0-9A-Z]{5,12}',                 # Starting with LG
+            r'[0-9][A-Z0-9]{7,14}',              # Starting with number
+            r'[A-Z0-9]{8,15}'                    # General alphanumeric (8-15 chars)
         ]
         
         for pattern in patterns:
             matches = re.findall(pattern, cleaned_text)
             if matches:
-                return matches[0], f"Extracted from text: {text.strip()}"
+                # Return the longest match (most likely to be complete)
+                best_match = max(matches, key=len)
+                logger.info(f"Found serial with pattern {pattern}: {best_match}")
+                return best_match, f"Extracted from text: {text.strip()}"
         
-        # If no pattern matched, return the longest alphanumeric string
-        words = text.split()
-        alphanumeric = [re.sub(r'[^A-Z0-9]', '', word.upper()) for word in words]
-        alphanumeric = [word for word in alphanumeric if word and len(word) >= 4]
+        # If no pattern matched, try to extract from the longest alphanumeric string
+        words = corrected_text.split()
+        alphanumeric = [re.sub(r'[^A-Z0-9]', '', word) for word in words]
+        alphanumeric = [word for word in alphanumeric if word and len(word) >= 6]
         
         if alphanumeric:
+            # Sort by length descending, then return the longest
             alphanumeric.sort(key=len, reverse=True)
-            return alphanumeric[0], f"Extracted from text: {text.strip()}"
+            best_candidate = alphanumeric[0]
+            logger.info(f"Using longest alphanumeric string: {best_candidate}")
+            return best_candidate, f"Extracted from text: {text.strip()}"
         
         return None, f"Could not identify serial number in text: {text.strip()}"
         
